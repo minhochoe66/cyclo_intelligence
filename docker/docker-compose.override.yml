@@ -9,3 +9,12 @@
 services:
   lerobot:
     image: robotis/lerobot-zenoh:${ARCH:-arm64}
+    environment:
+      - CONTROL_HZ=15
+      - INFERENCE_HZ=15
+      - TARGET_CHUNK_SIZE=none
+      - HF_HOME=/root/.cache/huggingface
+      - HUGGINGFACE_HUB_CACHE=/root/.cache/huggingface/hub
+      - TRANSFORMERS_CACHE=/root/.cache/huggingface/hub
+      - CMD_VEL_LINEAR_DEADBAND=0.02
+      - CMD_VEL_ANGULAR_DEADBAND=0.02

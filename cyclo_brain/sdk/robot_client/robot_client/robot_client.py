@@ -64,6 +64,21 @@ except ImportError:
 logger = logging.getLogger("robot_client")
 
 
+def _float_env(name: str, default: float) -> float:
+    raw = os.environ.get(name)
+    if raw is None or raw.strip() == "":
+        return default
+    try:
+        return float(raw)
+    except ValueError:
+        logger.warning("Invalid %s=%r; using %s", name, raw, default)
+        return default
+
+
+def _deadband(value: float, threshold: float) -> float:
+    return 0.0 if abs(value) < threshold else value
+
+
 def _build_runtime_config(section: dict) -> dict:
     """Translate the VLA-semantic schema into the cameras/joint_groups/
     sensors shape the RobotClient + inference engines consume.
@@ -196,12 +211,26 @@ class RobotClient:
         self._command_msg_types: dict[str, str] = {}
         self._command_joint_names: dict[str, list[str]] = {}
         self._action_keys = sorted(self._action_groups.keys())
+        self._cmd_vel_linear_deadband = max(
+            0.0,
+            _float_env("CMD_VEL_LINEAR_DEADBAND", 0.0),
+        )
+        self._cmd_vel_angular_deadband = max(
+            0.0,
+            _float_env("CMD_VEL_ANGULAR_DEADBAND", 0.0),
+        )
 
         self._closed = False
 
         self._init_subscriptions()
         if self._enable_command_publishers:
             self._init_command_publishers()
+            if self._cmd_vel_linear_deadband or self._cmd_vel_angular_deadband:
+                logger.info(
+                    "cmd_vel deadband enabled: linear=%s angular=%s",
+                    self._cmd_vel_linear_deadband,
+                    self._cmd_vel_angular_deadband,
+                )
         logger.info(f"RobotClient initialized: {robot_type} "
                      f"({len(self._config.get('cameras', {}))} cameras, "
                      f"{len(self._config.get('joint_groups', {}))} joint groups)")
@@ -566,15 +595,21 @@ class RobotClient:
 
     def _publish_twist(self, publisher: ROS2Publisher, values: np.ndarray) -> None:
         Vector3 = get_message_class("geometry_msgs/msg/Vector3")
+        linear_x = float(values[0]) if len(values) > 0 else 0.0
+        linear_y = float(values[1]) if len(values) > 1 else 0.0
+        angular_z = float(values[2]) if len(values) > 2 else 0.0
+        linear_x = _deadband(linear_x, self._cmd_vel_linear_deadband)
+        linear_y = _deadband(linear_y, self._cmd_vel_linear_deadband)
+        angular_z = _deadband(angular_z, self._cmd_vel_angular_deadband)
         linear = Vector3(
-            x=float(values[0]) if len(values) > 0 else 0.0,
-            y=float(values[1]) if len(values) > 1 else 0.0,
+            x=linear_x,
+            y=linear_y,
             z=0.0,
         )
         angular = Vector3(
             x=0.0,
             y=0.0,
-            z=float(values[2]) if len(values) > 2 else 0.0,
+            z=angular_z,
         )
         publisher.publish(linear=linear, angular=angular)
 

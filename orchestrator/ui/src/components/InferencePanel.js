@@ -95,6 +95,11 @@ const InferencePanel = () => {
     setShowPolicyBrowser(false);
   }, [isEditable, info, dispatch]);
 
+  const policyBrowserPath =
+    info.serviceType === 'groot'
+      ? DEFAULT_PATHS.GROOT_CHECKPOINTS_PATH
+      : DEFAULT_PATHS.LEROBOT_CHECKPOINTS_PATH;
+
   // Update isEditable state when the disabled prop changes
   useEffect(() => {
     setIsEditable(!disabled);
@@ -429,9 +434,9 @@ const InferencePanel = () => {
         selectButtonText="Select"
         allowDirectorySelect={true}
         allowFileSelect={false}
-        initialPath={DEFAULT_PATHS.HF_MODEL_DOWNLOAD_PATH}
-        defaultPath={DEFAULT_PATHS.HF_MODEL_DOWNLOAD_PATH}
-        homePath=""
+        initialPath={policyBrowserPath}
+        defaultPath={policyBrowserPath}
+        homePath={DEFAULT_PATHS.POLICY_CHECKPOINTS_PATH}
       />
     </div>
   );

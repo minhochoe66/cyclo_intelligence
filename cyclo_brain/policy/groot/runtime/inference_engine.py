@@ -44,6 +44,7 @@ if os.path.exists(_ROBOT_CLIENT_PATH) and _ROBOT_CLIENT_PATH not in sys.path:
 import gr00t.model  # noqa: F401 - register custom models
 from gr00t.data.embodiment_tags import EmbodimentTag  # noqa: E402
 from gr00t.policy.gr00t_policy import Gr00tPolicy  # noqa: E402
+from runtime.camera_mapping import resolve_camera_mappings  # noqa: E402
 from robot_client import RobotClient  # noqa: E402
 
 # Add GR00T root to sys.path for deployment script imports.
@@ -249,6 +250,7 @@ class GR00TInference:
         }
         self.robot_info: dict = {
             "cameras": [],         # active camera names matched with model
+            "camera_map": {},      # robot camera name -> policy video key
             "joints": {},          # modality_key -> yaml_group mapping
             "camera_rotations": {},  # camera_name -> rotation_deg
         }
@@ -347,9 +349,12 @@ class GR00TInference:
         self.robot = RobotClient(robot_type)
         cam_config = self.robot._config.get("cameras", {})
 
-        self.robot_info["cameras"] = [
-            k for k in self.robot.camera_names if k in self.policy_info["video"]
-        ]
+        camera_map = resolve_camera_mappings(
+            self.robot.camera_names,
+            self.policy_info["video"],
+        )
+        self.robot_info["cameras"] = list(camera_map.keys())
+        self.robot_info["camera_map"] = camera_map
         self.robot_info["camera_rotations"] = {
             name: cfg.get("rotation_deg", 0)
             for name, cfg in cam_config.items()
@@ -403,14 +408,14 @@ class GR00TInference:
             return self.fail("No recent observations from sensors")
 
         video_obs = {}
-        for cam_key in self.robot_info["cameras"]:
+        for cam_key, policy_key in self.robot_info.get("camera_map", {}).items():
             img = images.get(cam_key)
             if img is None:
                 return self.fail(f"Missing camera: {cam_key}")
             rotation = self.robot_info["camera_rotations"].get(cam_key)
             if rotation and rotation in self.ROTATE_MAP:
                 img = cv2.rotate(img, self.ROTATE_MAP[rotation])
-            video_obs[cam_key] = img[np.newaxis, np.newaxis, ...]  # (1,1,H,W,C)
+            video_obs[policy_key] = img[np.newaxis, np.newaxis, ...]  # (1,1,H,W,C)
 
         state_obs = {}
         for modality_key, yaml_group in self.robot_info["joints"].items():
@@ -472,6 +477,7 @@ class GR00TInference:
         self.policy_info = {k: [] for k in self.policy_info}
         self.robot_info = {
             "cameras": [],
+            "camera_map": {},
             "joints": {},
             "camera_rotations": {},
         }

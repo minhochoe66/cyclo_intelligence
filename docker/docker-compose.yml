@@ -82,6 +82,11 @@ services:
       - /dev/shm:/dev/shm
       - ./workspace:/workspace
       - ./huggingface:/root/.cache/huggingface
+      # Policy checkpoint dropboxes. These paths intentionally match the
+      # policy containers so a path selected in the UI can be sent directly
+      # to /lerobot or /groot without translation.
+      - ../cyclo_brain/policy/lerobot/checkpoints:/policy_checkpoints/lerobot:rw
+      - ../cyclo_brain/policy/groot/checkpoints:/policy_checkpoints/groot:rw
       - /tmp/.X11-unix:/tmp/.X11-unix:rw
       # Live-edit the ROS2 workspace at runtime so a 'colcon build'
       # inside the container sees host-side edits. The container copy
@@ -290,6 +295,14 @@ services:
       # Start N1.7 in PyTorch eager mode. Enable after model-load/action
       # smoke tests pass on the target robot.
       - GROOT_TRT_ENABLED=false
+      - CONTROL_HZ=15
+      - INFERENCE_HZ=15
+      - TARGET_CHUNK_SIZE=none
+      - CMD_VEL_LINEAR_DEADBAND=0.02
+      - CMD_VEL_ANGULAR_DEADBAND=0.02
+      - HF_HOME=/root/.cache/huggingface
+      - HUGGINGFACE_HUB_CACHE=/root/.cache/huggingface/hub
+      - TRANSFORMERS_CACHE=/root/.cache/huggingface/hub
       - NVIDIA_VISIBLE_DEVICES=all
       - NVIDIA_DRIVER_CAPABILITIES=all
       - PYTHONUNBUFFERED=1
@@ -299,6 +312,10 @@ services:
       - /dev/shm:/dev/shm
       - ./workspace:/workspace
       - ./huggingface:/root/.cache/huggingface
+      # User-visible policy checkpoint dropbox. Put local GR00T models under
+      # cyclo_brain/policy/groot/checkpoints/ on the host, then LOAD them
+      # from /policy_checkpoints/groot/<model-or-checkpoint> in the container.
+      - ../cyclo_brain/policy/groot/checkpoints:/policy_checkpoints/groot:rw
       # Live-edit SDKs (mounted read-only so the container can't mutate
       # the host tree accidentally).
       - ../cyclo_brain/sdk/zenoh_ros2_sdk:/zenoh_sdk:ro
