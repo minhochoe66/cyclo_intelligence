@@ -16,7 +16,15 @@
 #
 # Author: Seongwoo Kim
 
-"""Action node that waits for a specified duration."""
+"""Template for a custom BT action node.
+
+Copy this file to:
+
+    orchestrator/orchestrator/bt/actions/my_action.py
+
+Then rename `MyAction`, adjust constructor parameters, implement tick(), and
+press "Refresh Nodes" in BT Manager.
+"""
 
 import time
 from typing import TYPE_CHECKING
@@ -28,33 +36,24 @@ if TYPE_CHECKING:
     from rclpy.node import Node
 
 
-class Wait(BaseAction):
-    """Block the surrounding sequence for a fixed duration, then return SUCCESS.
-
-    Useful for letting hardware settle between motion commands.
-    """
-
-    def __init__(self, node: 'Node', duration: float = 5.0):
-        """Initialize the Wait action."""
-        super().__init__(node, name='Wait')
-        self.duration = duration
+class MyAction(BaseAction):
+    def __init__(self, node: 'Node', duration: float = 1.0):
+        super().__init__(node, name='MyAction')
+        self.duration = float(duration)
         self._start_time = None
 
     def tick(self) -> NodeStatus:
-        """Return RUNNING until duration has elapsed."""
         if self._start_time is None:
             self._start_time = time.monotonic()
-            self.log_info(f'Waiting for {self.duration}s')
+            self.log_info(f'Started for {self.duration}s')
             return NodeStatus.RUNNING
 
-        elapsed = time.monotonic() - self._start_time
-        if elapsed >= self.duration:
-            self.log_info(f'Wait complete ({self.duration}s)')
+        if time.monotonic() - self._start_time >= self.duration:
+            self.log_info('Finished')
             return NodeStatus.SUCCESS
 
         return NodeStatus.RUNNING
 
     def reset(self):
-        """Reset the action to its initial state."""
         super().reset()
         self._start_time = None

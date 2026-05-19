@@ -154,7 +154,6 @@ function serializeElement(el, depth, lines) {
  * nodes      — ReactFlow node array (need .id and .position)
  * edges      — ReactFlow edge array (source → target = parent → child)
  * nodeDataMap — Map<id, {tag, name, params}>
- *
  * The node with in-degree 0 that has children (or is a control type) becomes
  * the main tree root.  Nodes not reachable from the main root are stored in a
  * separate <BehaviorTree ID="__pending__"> section that BT.cpp ignores.

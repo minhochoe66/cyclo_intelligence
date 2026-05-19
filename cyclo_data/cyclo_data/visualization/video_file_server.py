@@ -201,12 +201,15 @@ class VideoFileHandler(SimpleHTTPRequestHandler):
                 self.wfile.write(chunk)
                 remaining -= len(chunk)
 
-    def _send_json_error(self, code, message):
+    def _send_json_error(self, code, message, extra=None):
         """Send JSON error response with CORS headers."""
-        error_response = json.dumps({
+        payload = {
             'success': False,
             'message': message
-        })
+        }
+        if extra:
+            payload.update(extra)
+        error_response = json.dumps(payload)
         error_bytes = error_response.encode('utf-8')
 
         self.send_response(code)
@@ -464,6 +467,7 @@ class VideoFileHandler(SimpleHTTPRequestHandler):
             data = json.loads(body.decode('utf-8'))
             filename = data.get('filename', '').strip()
             xml_content = data.get('content', '')
+            overwrite = bool(data.get('overwrite', False))
 
             # Validate filename: alphanumeric, dash, underscore, dot only; must end with .xml
             if not filename:
@@ -485,6 +489,18 @@ class VideoFileHandler(SimpleHTTPRequestHandler):
                 return
 
             save_path = os.path.join(trees_dir, filename)
+            if os.path.exists(save_path) and not overwrite:
+                self._send_json_error(
+                    409,
+                    f'Tree already exists: {filename}',
+                    {
+                        'code': 'file_exists',
+                        'filename': filename,
+                        'full_path': save_path,
+                    },
+                )
+                return
+
             with open(save_path, 'w', encoding='utf-8') as f:
                 f.write(xml_content)
 

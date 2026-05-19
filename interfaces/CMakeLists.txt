@@ -28,6 +28,7 @@ rosidl_generate_interfaces(${PROJECT_NAME}
   "srv/SelectHFEndpoint.srv"
   "srv/GetImageTopicList.srv"
   "srv/GetModelWeightList.srv"
+  "srv/GetNodeCatalog.srv"
   "srv/GetPolicyList.srv"
   "srv/GetReplayData.srv"
   "srv/GetRobotTypeList.srv"

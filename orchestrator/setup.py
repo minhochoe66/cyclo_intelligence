@@ -40,6 +40,7 @@ packages = [
     f'{package_name}.bt',
     f'{package_name}.bt.actions',
     f'{package_name}.bt.controls',
+    f'{package_name}.bt.templates',
     f'{package_name}.internal',
     f'{package_name}.internal.communication',
     f'{package_name}.internal.device_manager',
@@ -77,6 +78,10 @@ setup(
         (
             'share/' + package_name + '/bt/bringup',
             glob(f'{package_name}/bt/bringup/*.yaml'),
+        ),
+        (
+            'share/' + package_name + '/bt/templates',
+            glob(f'{package_name}/bt/templates/*'),
         ),
     ],
     install_requires=[

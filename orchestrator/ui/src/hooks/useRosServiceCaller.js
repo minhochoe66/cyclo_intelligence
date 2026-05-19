@@ -289,6 +289,20 @@ export function useRosServiceCaller() {
     }
   }, [callService]);
 
+  const getNodeCatalog = useCallback(async () => {
+    try {
+      const result = await callService(
+        '/bt/nodes/catalog',
+        'interfaces/srv/GetNodeCatalog',
+        {}
+      );
+      return result;
+    } catch (error) {
+      console.error('Failed to get BT node catalog:', error);
+      throw new Error(`${error.message || error}`);
+    }
+  }, [callService]);
+
   const getRobotTypeList = useCallback(async () => {
     try {
       const result = await callService(
@@ -838,6 +852,7 @@ export function useRosServiceCaller() {
     sendRecordCommand,
     getImageTopicList,
     getTreeList,
+    getNodeCatalog,
     getRobotTypeList,
     setRobotType,
     registerHFUser,

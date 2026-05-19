@@ -14,12 +14,21 @@
 //
 // Author: Seongwoo Kim
 
-import { CATALOG_BY_CATEGORY } from '../../constants/btNodeCatalog';
+import { useMemo } from 'react';
+import { MdRefresh } from 'react-icons/md';
+import { useBTNodeCatalog } from '../../hooks/useBTNodeCatalog';
 
 // Drag the cards onto a Control node in the canvas to add a child.
 export const PALETTE_DRAG_MIME = 'application/bt-node-tag';
 
 export default function BTNodePalette() {
+  const { catalog, source, refreshCatalog } = useBTNodeCatalog();
+
+  const grouped = useMemo(() => ({
+    control: catalog.filter((n) => n.category === 'control'),
+    action: catalog.filter((n) => n.category === 'action'),
+  }), [catalog]);
+
   const handleDragStart = (event, tag) => {
     event.dataTransfer.setData(PALETTE_DRAG_MIME, tag);
     // Plain-text fallback for browsers that ignore custom MIME types.
@@ -30,23 +39,42 @@ export default function BTNodePalette() {
   return (
     <div className="w-[180px] shrink-0 bg-white border-r border-gray-200 flex flex-col">
       <div className="px-3 py-3 border-b border-gray-200">
-        <div className="text-sm font-bold text-gray-800">Add Node</div>
+        <div className="flex items-center justify-between gap-2">
+          <div className="text-sm font-bold text-gray-800">Add Node</div>
+          <button
+            type="button"
+            onClick={() => refreshCatalog({ force: true })}
+            disabled={source === 'loading'}
+            className="p-1 rounded text-gray-500 hover:text-gray-800 hover:bg-gray-100 disabled:opacity-40 disabled:cursor-not-allowed"
+            title="Refresh node catalog from /bt/nodes/catalog"
+          >
+            <MdRefresh size={16} />
+          </button>
+        </div>
         <div className="text-[11px] text-gray-500 mt-0.5">
           Drag onto a Control node
         </div>
+        {source === 'fallback' && (
+          <div
+            className="mt-1 text-[10px] text-amber-600"
+            title="Could not reach /bt/nodes/catalog — using the bundled fallback catalog."
+          >
+            offline catalog
+          </div>
+        )}
       </div>
 
       <div className="flex-1 overflow-y-auto py-2">
         <Section
           title="Controls"
           accentClass="border-blue-300 text-blue-700"
-          items={CATALOG_BY_CATEGORY.control}
+          items={grouped.control}
           onDragStart={handleDragStart}
         />
         <Section
           title="Actions"
           accentClass="border-green-300 text-green-700"
-          items={CATALOG_BY_CATEGORY.action}
+          items={grouped.action}
           onDragStart={handleDragStart}
         />
       </div>

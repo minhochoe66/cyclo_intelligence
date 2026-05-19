@@ -39,7 +39,7 @@ import { serializeFromGraph } from '../utils/btXmlSerializer';
 import { setTreeXml, setTreeFileName, setBtStatus, setActiveNodeNames, setSelectedNodeId } from '../features/btmanager/btmanagerSlice';
 import { useRosServiceCaller } from '../hooks/useRosServiceCaller';
 import { useBTHistory } from '../hooks/useBTHistory';
-import { findNodeMeta, isControlTag } from '../constants/btNodeCatalog';
+import { useBTNodeCatalog } from '../hooks/useBTNodeCatalog';
 
 const nodeTypes = {
   btControl: BTControlNode,
@@ -90,9 +90,16 @@ function layoutVisibleOnly(nodes, edges) {
   return nodes.map((n) => (byId.has(n.id) ? byId.get(n.id) : n));
 }
 
+function catalogEntryToParams(entry) {
+  return Object.fromEntries(
+    (entry?.ports || []).map((port) => [port.name, port.default]),
+  );
+}
+
 export default function BTManagerPage({ isActive = true }) {
   const dispatch = useDispatch();
   const { callService } = useRosServiceCaller();
+  const { catalog: nodeCatalog = [] } = useBTNodeCatalog();
   const rosbridgeUrl = useSelector((state) => state.ros.rosbridgeUrl);
 
   const treeXml = useSelector((state) => state.btmanager.treeXml);
@@ -109,6 +116,7 @@ export default function BTManagerPage({ isActive = true }) {
   const [showTreeList, setShowTreeList] = useState(false);
   const [showSaveDialog, setShowSaveDialog] = useState(false);
   const [saveFileName, setSaveFileName] = useState('');
+  const [saveConflict, setSaveConflict] = useState(null);
 
   // ReactFlow instance for coordinate conversion on drop
   const reactFlowRef = useRef(null);
@@ -263,7 +271,8 @@ export default function BTManagerPage({ isActive = true }) {
     const tag =
       event.dataTransfer.getData(PALETTE_DRAG_MIME) ||
       event.dataTransfer.getData('text/plain');
-    if (!tag || !findNodeMeta(tag)) return;
+    const meta = nodeCatalog.find((entry) => entry.tag === tag);
+    if (!tag || !meta) return;
     event.preventDefault();
 
     // Convert screen coordinates to ReactFlow canvas coordinates
@@ -279,11 +288,10 @@ export default function BTManagerPage({ isActive = true }) {
     }
     const autoName = `${tag}_${maxIdx + 1}`;
     const id = `bt_${Date.now()}`;
-    const meta = findNodeMeta(tag);
-    const params = meta ? { ...meta.params } : {};
+    const params = catalogEntryToParams(meta);
 
     captureHistory();
-    const isControl = isControlTag(tag);
+    const isControl = meta.category === 'control';
     const newNode = {
       id,
       type: isControl ? 'btControl' : 'btAction',
@@ -312,7 +320,7 @@ export default function BTManagerPage({ isActive = true }) {
       )
     );
     dispatch(setSelectedNodeId(id));
-  }, [captureHistory, setNodes, dispatch]);
+  }, [captureHistory, setNodes, dispatch, nodeCatalog]);
 
   // ── Manual edge connection ────────────────────────────────────────────────
   const handleConnect = useCallback((connection) => {
@@ -486,7 +494,7 @@ export default function BTManagerPage({ isActive = true }) {
   }, [nodes, edges, nodeDataMap]);
 
   // ── Save As ───────────────────────────────────────────────────────────────
-  const handleSaveAs = useCallback(async () => {
+  const handleSaveAs = useCallback(async ({ overwrite = false } = {}) => {
     const name = saveFileName.trim();
     if (!name) return;
 
@@ -498,14 +506,20 @@ export default function BTManagerPage({ isActive = true }) {
       const res = await fetch(`${baseUrl}/bt/save_tree`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ filename: name, content }),
+        body: JSON.stringify({ filename: name, content, overwrite }),
       });
       const data = await res.json();
       if (data.success) {
         toast.success(data.message);
         setShowSaveDialog(false);
         setSaveFileName('');
+        setSaveConflict(null);
       } else {
+        if (res.status === 409 || data.code === 'file_exists') {
+          setSaveConflict(data);
+          toast.error(data.message || 'File already exists');
+          return;
+        }
         toast.error(data.message || 'Save failed');
       }
     } catch (err) {
@@ -521,23 +535,6 @@ export default function BTManagerPage({ isActive = true }) {
     }
     try {
       const currentXml = getSerializedXml();
-
-      const baseUrl = getHttpBaseUrl();
-      const launchRes = await fetch(`${baseUrl}/bt/launch`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({}),
-      });
-      const launchData = await launchRes.json();
-      if (!launchData.success) {
-        toast.error(`Failed to launch BT node: ${launchData.message}`);
-        return;
-      }
-
-      const isAlreadyRunning = launchData.message.includes('already running');
-      if (!isAlreadyRunning) {
-        await new Promise((resolve) => setTimeout(resolve, 8000));
-      }
 
       const result = await callService(
         '/bt/load_and_run',
@@ -555,37 +552,23 @@ export default function BTManagerPage({ isActive = true }) {
     } catch (err) {
       toast.error(`Failed to start BT: ${err.message}`);
     }
-  }, [callService, dispatch, nodes.length, getSerializedXml, getHttpBaseUrl]);
+  }, [callService, dispatch, nodes.length, getSerializedXml]);
 
   // ── BT Stop ───────────────────────────────────────────────────────────────
   const handleStop = useCallback(async () => {
     try {
-      try {
-        await callService('/bt/set_running', 'std_srvs/srv/SetBool', { data: false });
-      } catch {
-        // BT node may already be gone
+      const result = await callService('/bt/set_running', 'std_srvs/srv/SetBool', { data: false });
+      if (!result.success) {
+        toast.error(`Failed: ${result.message}`);
+        return;
       }
-      const baseUrl = getHttpBaseUrl();
-      await fetch(`${baseUrl}/bt/shutdown`, { method: 'POST' });
       dispatch(setBtStatus('stopped'));
       dispatch(setActiveNodeNames([]));
       toast.success('BT stopped');
     } catch (err) {
       toast.error(`Failed to stop BT: ${err.message}`);
     }
-  }, [callService, dispatch, getHttpBaseUrl]);
-
-  // ── Auto-stop when the tree finishes on its own ──────────────────────────
-  // BehaviorTreeNode publishes /bt/status='completed' once the root returns
-  // SUCCESS or FAILURE, but leaves the BT process alive — the user otherwise
-  // has to click Stop manually to free the slot. Treat 'completed' as an
-  // implicit Stop so the button state flips back to Start-ready and the BT
-  // node is torn down at the same time.
-  useEffect(() => {
-    if (btStatus === 'completed') {
-      handleStop();
-    }
-  }, [btStatus, handleStop]);
+  }, [callService, dispatch]);
 
   // ── BT status / active-nodes subscription ────────────────────────────────
   useEffect(() => {
@@ -742,6 +725,7 @@ export default function BTManagerPage({ isActive = true }) {
           <button
             onClick={() => {
               setSaveFileName(treeFileName ? treeFileName.replace(/\.xml$/i, '') : '');
+              setSaveConflict(null);
               setShowSaveDialog(true);
             }}
             disabled={!hasTree}
@@ -836,10 +820,10 @@ export default function BTManagerPage({ isActive = true }) {
         <div className="flex items-center gap-3">
           <button
             onClick={handleStart}
-            disabled={btStatus === 'running' || btStatus === 'completed' || !hasTree}
+            disabled={btStatus === 'running' || !hasTree}
             className={clsx(
               'flex items-center gap-2 px-5 py-2 rounded-lg text-sm font-medium transition-colors',
-              (btStatus === 'running' || btStatus === 'completed' || !hasTree)
+              (btStatus === 'running' || !hasTree)
                 ? 'bg-gray-200 text-gray-400 cursor-not-allowed'
                 : 'bg-green-600 hover:bg-green-700 text-white'
             )}
@@ -885,23 +869,48 @@ export default function BTManagerPage({ isActive = true }) {
                 autoFocus
                 type="text"
                 value={saveFileName}
-                onChange={(e) => setSaveFileName(e.target.value)}
+                onChange={(e) => {
+                  setSaveFileName(e.target.value);
+                  setSaveConflict(null);
+                }}
                 onKeyDown={(e) => {
                   if (e.key === 'Enter') handleSaveAs();
-                  if (e.key === 'Escape') setShowSaveDialog(false);
+                  if (e.key === 'Escape') {
+                    setShowSaveDialog(false);
+                    setSaveConflict(null);
+                  }
                 }}
                 placeholder="filename"
                 className="flex-1 text-sm outline-none"
               />
               <span className="text-sm text-gray-400">.xml</span>
             </div>
+            {saveConflict && (
+              <div className="mt-3 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800">
+                <div className="font-medium">File already exists</div>
+                <div className="mt-1">
+                  Choose another name or overwrite {saveConflict.filename || 'this file'}.
+                </div>
+              </div>
+            )}
             <div className="flex justify-end gap-2 mt-4">
               <button
-                onClick={() => setShowSaveDialog(false)}
+                onClick={() => {
+                  setShowSaveDialog(false);
+                  setSaveConflict(null);
+                }}
                 className="px-4 py-2 text-sm text-gray-600 hover:bg-gray-100 rounded-lg transition-colors"
               >
                 Cancel
               </button>
+              {saveConflict && (
+                <button
+                  onClick={() => handleSaveAs({ overwrite: true })}
+                  className="px-4 py-2 text-sm font-medium rounded-lg transition-colors bg-red-50 hover:bg-red-100 text-red-700"
+                >
+                  Overwrite
+                </button>
+              )}
               <button
                 onClick={handleSaveAs}
                 disabled={!saveFileName.trim()}

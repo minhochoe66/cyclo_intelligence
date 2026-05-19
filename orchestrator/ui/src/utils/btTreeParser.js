@@ -49,6 +49,7 @@ export function parseBTXml(xmlString) {
   let rootElement = null;
   for (const bt of behaviorTrees) {
     if (bt.getAttribute('ID') === mainTreeId) {
+      // Only the selected BehaviorTree's first child becomes the graph root.
       rootElement = bt.children[0];
       break;
     }

@@ -14,9 +14,9 @@ orchestrator/
 │                              <pkg>_node.py convention.
 ├── launch/                    ros2 launch files.
 │   ├── orchestrator.launch.py          OrchestratorNode only.
-│   ├── orchestrator_bringup.launch.py  OrchestratorNode + rosbridge
-│   │                                   + rosbag_recorder +
-│   │                                   web_video_server.
+│   ├── orchestrator_bringup.launch.py  OrchestratorNode + bt_node
+│   │                                   + rosbridge + rosbag_recorder
+│   │                                   + web_video_server.
 │   └── bt_node.launch.py      BT node (Step 5-A — absorbed from
 │                              physical_ai_bt/bt_bringup/).
 ├── config/                    Robot-specific YAML
@@ -28,17 +28,20 @@ orchestrator/
 │     │                        from physical_ai_bt in Step 5-A).
 │     ├── bt_core.py           NodeStatus, BTNode base classes.
 │     ├── bt_node.py           BehaviorTreeNode ROS2 Node
-│     │                        (orchestrator_bt_node). Loads tree
-│     │                        XML from share/orchestrator/bt/trees/
-│     │                        at startup.
-│     ├── bt_nodes_loader.py   XML → runtime tree assembly.
+│     │                        (orchestrator_bt_node). Provides
+│     │                        /bt/nodes/catalog, /bt/load_and_run,
+│     │                        /bt/set_running, /bt/status, and
+│     │                        /bt/active_nodes.
+│     ├── bt_nodes_loader.py   XML → runtime tree assembly via the
+│     │                        dynamic node registry.
+│     ├── node_registry.py     Scans actions/controls and builds the
+│     │                        BT Manager catalog from class signatures.
 │     ├── blackboard.py        Shared-state blackboard.
-│     ├── constants.py         Tree-loading magic strings.
-│     ├── actions/             8 action nodes (move_arms, move_head,
-│     │                        move_lift, rotate, wait,
-│     │                        send_command, wait_until_gripper,
-│     │                        wait_until_pose).
+│     ├── constants.py         Runtime defaults for BT actions.
+│     ├── actions/             Built-in and user-defined action nodes.
 │     ├── controls/            loop / sequence / base_control.
+│     ├── templates/           Copy-and-edit templates for custom
+│     │                        Action / Control BT nodes.
 │     ├── trees/               Robot-specific tree XML
 │     │                        (ffw_sg2_rev1.xml, korea_mat.xml).
 │     │                        Installed under share/orchestrator/
@@ -88,7 +91,7 @@ orchestrator/
 | UI command routing (`/send_command`) | orchestrator | UI-side boundary — orchestrator translates to the appropriate downstream srv |
 | Robot control plane publishers | orchestrator | synchronous `JointTrajectory` / `Twist` commands from tree nodes |
 | Policy container lifecycle | orchestrator | `InferenceCommand` dispatch, client ownership |
-| Behaviour tree execution | orchestrator | `/bt/load_and_run` is a control-plane trigger |
+| Behaviour tree catalog + execution | orchestrator | `bt_node` owns `/bt/nodes/catalog`, `/bt/load_and_run`, `/bt/set_running`, `/bt/status`, `/bt/active_nodes` |
 | Recording / conversion / HF / editing | cyclo_data | data-plane workers (Step 3 atomic swaps) |
 | Dataset visualisation | cyclo_data | `video_file_server`, replay handlers |
 
@@ -103,15 +106,65 @@ orchestrator/
 
 ## BT node lifecycle
 
-`BehaviorTreeNode` (`bt/bt_node.py`) runs as a separate executable
-(entry_point: `bt_node`) that plugs into the orchestrator ROS2
-graph. Launch it with:
+`BehaviorTreeNode` (`bt/bt_node.py`) runs as the `bt_node` executable.
+The normal bringup launch starts it so catalog and runtime services stay
+available while BT Manager is open:
+```
+ros2 launch orchestrator orchestrator_bringup.launch.py
+```
+
+For isolated debugging, launch only the BT node with:
 ```
 ros2 launch orchestrator bt_node.launch.py robot_type:=ffw_sg2_rev1
 ```
 
 The tree XML is loaded from `share/orchestrator/bt/trees/<tree>.xml`;
 params come from `share/orchestrator/bt/bringup/bt_node_params.yaml`.
+
+BT Manager Start/Stop controls tree execution, not the `bt_node` process:
+
+- **Start** serializes the current graph and calls `/bt/load_and_run`.
+- **Stop** calls `/bt/set_running` with `false`.
+- When a tree completes, `bt_node` remains alive so the catalog and refresh
+  flow keep working.
+
+## Custom BT nodes
+
+User-defined nodes are plain Python files under
+`orchestrator/orchestrator/bt/actions/` or
+`orchestrator/orchestrator/bt/controls/`. The BT registry scans those
+folders dynamically, so editing `actions/__init__.py` or `controls/__init__.py`
+is not required for BT Manager discovery or XML execution. Those files are
+only for package-level imports.
+
+Start from the templates in `orchestrator/orchestrator/bt/templates/`
+(installed to `share/orchestrator/bt/templates/`):
+
+- `action_template.py` subclasses `BaseAction`, defines constructor kwargs,
+  implements `tick()`, and resets local runtime state.
+- `control_template.py` subclasses `BaseControl`, defines constructor kwargs,
+  ticks children, reports active child IDs, and resets its child index.
+
+Class names become XML tags. Constructor kwargs become BT Manager ports; type
+hints and defaults become port types and default values. No `META`,
+`NODE_TAG`, `PORT_METADATA`, or description block is required.
+
+Simple nodes need only an `__init__()`, `tick()`, and optional `reset()`.
+Use `from_xml_params(context, name, params)` only when a node needs runtime
+dependencies from the loader, such as the ROS node, topic config, joint names,
+or helper methods. Built-in examples include `Rotate`, `JointControl`, and
+`SendCommand`.
+
+After adding or deleting a node file, click **Refresh Nodes** in BT Manager.
+If running from an installed package instead of a source-mounted workspace,
+rebuild/restart first so the new file exists in the install space.
+
+## BT Manager XML saving
+
+BT Manager saves XML files through `cyclo_data`'s HTTP file server
+(`/bt/save_tree`) into `orchestrator/orchestrator/bt/trees/`. A duplicate file
+name is rejected by default to prevent accidental overwrite; the UI shows an
+explicit **Overwrite** action only after the server reports a name conflict.
 
 ## Entry points
 

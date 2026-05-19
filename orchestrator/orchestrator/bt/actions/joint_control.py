@@ -18,16 +18,14 @@
 
 """Rule-based joint-space control for head, arms, and lift.
 
-Replaces the earlier MoveHead / MoveArms / MoveLift trio. A single node
-can drive any combination of the three joint groups: just toggle the
-matching enable_* flag and supply its positions. With multiple groups on
-at once their trajectories fire simultaneously and the node succeeds
-once all activated joints land within position_threshold.
+A single node can drive any combination of the three joint groups: just
+toggle the matching enable_* flag and supply its positions. With multiple
+groups on at once their trajectories fire simultaneously and the node
+succeeds once all activated joints land within position_threshold.
 """
 
 import threading
 import time
-from typing import List
 from typing import Optional
 from typing import TYPE_CHECKING
 
@@ -85,7 +83,7 @@ GROUP_DEFAULTS = {
 }
 
 
-def _coerce_positions(value) -> Optional[List[float]]:
+def _coerce_positions(value) -> Optional[list[float]]:
     """Normalise a positions param into list[float].
 
     XML attributes arrive as int / float / list (from bt_nodes_loader's
@@ -109,23 +107,74 @@ class JointControl(BaseAction):
     can't silently succeed at runtime.
     """
 
-    SUPPORTED_GROUPS = ('head', 'arm_left', 'arm_right', 'lift')
+    @classmethod
+    def from_xml_params(cls, context, name: str, params: dict):
+        enable_head = bool(params.get('enable_head', False))
+        enable_arms = bool(params.get('enable_arms', False))
+        enable_lift = bool(params.get('enable_lift', False))
+
+        kwargs = {
+            'node': context.node,
+            'enable_head': enable_head,
+            'enable_arms': enable_arms,
+            'enable_lift': enable_lift,
+        }
+
+        if enable_head:
+            kwargs['head_positions'] = params.get(
+                'head_positions', [0.0, 0.0],
+            )
+            head_joints = context.get_joint_names_for_group('leader_head')
+            if head_joints:
+                kwargs['head_joint_names'] = head_joints
+
+        if enable_arms:
+            default_positions = [0.0] * 8
+            kwargs['left_positions'] = params.get(
+                'left_positions', default_positions,
+            )
+            kwargs['right_positions'] = params.get(
+                'right_positions', default_positions,
+            )
+            left_joints = context.get_joint_names_for_group('leader_left')
+            right_joints = context.get_joint_names_for_group('leader_right')
+            if left_joints:
+                kwargs['left_joint_names'] = left_joints
+            if right_joints:
+                kwargs['right_joint_names'] = right_joints
+
+        if enable_lift:
+            kwargs['lift_position'] = params.get('lift_position', 0.0)
+            lift_joints = context.get_joint_names_for_group('leader_lift')
+            if lift_joints:
+                kwargs['lift_joint_name'] = lift_joints[0]
+
+        duration = params.get('duration')
+        if duration is not None:
+            kwargs['duration'] = duration
+        position_threshold = params.get('position_threshold')
+        if position_threshold is not None:
+            kwargs['position_threshold'] = position_threshold
+
+        action = cls(**kwargs)
+        action.name = name
+        return action
 
     def __init__(
         self,
         node: 'Node',
-        enable_head: bool = False,
-        head_positions: Optional[List[float]] = None,
-        head_joint_names: Optional[List[str]] = None,
+        enable_head: bool = True,
+        head_positions='0.0, 0.0',
+        head_joint_names: Optional[list[str]] = None,
         enable_arms: bool = False,
-        left_positions: Optional[List[float]] = None,
-        right_positions: Optional[List[float]] = None,
-        left_joint_names: Optional[List[str]] = None,
-        right_joint_names: Optional[List[str]] = None,
+        left_positions: Optional[list[float]] = None,
+        right_positions: Optional[list[float]] = None,
+        left_joint_names: Optional[list[str]] = None,
+        right_joint_names: Optional[list[str]] = None,
         enable_lift: bool = False,
-        lift_position=None,
+        lift_position: float = 0.0,
         lift_joint_name: Optional[str] = None,
-        duration: Optional[float] = None,
+        duration: Optional[float] = 2.0,
         position_threshold: float = POSITION_THRESHOLD_RAD,  # noqa: F405
     ):
         super().__init__(node, name='JointControl')

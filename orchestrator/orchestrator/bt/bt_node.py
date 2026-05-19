@@ -18,12 +18,14 @@
 
 """ROS 2 node for executing behavior trees."""
 
+import json
 import os
 
 from ament_index_python.packages import get_package_share_directory
 import rclpy
 from rclpy.executors import MultiThreadedExecutor
 from rclpy.node import Node
+from interfaces.srv import GetNodeCatalog
 from interfaces.srv import LoadAndRunTree
 from interfaces.srv import SendCommand
 from std_msgs.msg import String
@@ -32,6 +34,12 @@ from std_srvs.srv import SetBool
 from orchestrator.bt.blackboard import Blackboard  # noqa: I100
 from orchestrator.bt.bt_core import NodeStatus  # noqa: I100
 from orchestrator.bt.bt_nodes_loader import TreeLoader  # noqa: I100
+from orchestrator.bt.node_registry import (  # noqa: I100
+    SCHEMA_VERSION,
+    build_registry,
+    catalog_payload,
+    validate_registry,
+)
 
 
 class BehaviorTreeNode(Node):
@@ -110,6 +118,17 @@ class BehaviorTreeNode(Node):
         # Service: load tree from XML string and start execution
         self.load_and_run_srv = self.create_service(
             LoadAndRunTree, '/bt/load_and_run', self._load_and_run_callback
+        )
+
+        # Service: return the catalog of available BT node types. The UI
+        # palette + param panel consume this. Validation runs once at startup
+        # so catalog shape mistakes surface in logs instead of silently
+        # breaking the first fetch.
+        self._validate_node_registry()
+        self.nodes_catalog_srv = self.create_service(
+            GetNodeCatalog,
+            '/bt/nodes/catalog',
+            self._nodes_catalog_callback,
         )
 
         # Service client: cleanup inference on BT stop
@@ -294,6 +313,38 @@ class BehaviorTreeNode(Node):
             self.root = None
             self.tree_execution_mode = 'stopped'
             self._publish_status()
+        return response
+
+    def _validate_node_registry(self):
+        """Log any inconsistencies between catalog entries and ctors."""
+        registry = build_registry()
+        problems = validate_registry(registry)
+        for problem in problems:
+            self.get_logger().error(f'Node registry: {problem}')
+        if not problems:
+            self.get_logger().info(
+                f'Node registry validated ({len(registry)} nodes, '
+                f'schema {SCHEMA_VERSION})'
+            )
+
+    def _nodes_catalog_callback(self, request, response):
+        """Return the BT node catalog as a JSON string."""
+        try:
+            registry = build_registry()
+            problems = validate_registry(registry)
+            if problems:
+                raise ValueError('; '.join(problems))
+
+            response.catalog_json = json.dumps(catalog_payload(registry))
+            response.schema_version = SCHEMA_VERSION
+            response.success = True
+            response.message = ''
+        except Exception as e:
+            response.catalog_json = '[]'
+            response.schema_version = SCHEMA_VERSION
+            response.success = False
+            response.message = f'Failed to build catalog: {e}'
+            self.get_logger().error(response.message)
         return response
 
     def _publish_status(self):

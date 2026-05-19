@@ -40,7 +40,7 @@ from typing import TYPE_CHECKING
 from orchestrator.bt.actions.base_action import BaseAction
 from orchestrator.bt.bt_core import NodeStatus
 from interfaces.msg import InferenceStatus, TaskInfo
-from interfaces.srv import SendCommand
+from interfaces.srv import SendCommand as SendCommandSrv
 from rclpy.qos import QoSProfile
 from rclpy.qos import ReliabilityPolicy
 
@@ -48,7 +48,7 @@ if TYPE_CHECKING:
     from rclpy.node import Node
 
 
-# Per BT command, the ordered list of (SendCommand enum, target phase,
+# Per BT command, the ordered list of (SendCommandSrv enum, target phase,
 # stage timeout, whether to attach task_info) the node executes. LOAD
 # is the only multi-stage command — it runs START_INFERENCE first so
 # the orchestrator's existing already-loaded-vs-fresh-load logic does
@@ -56,13 +56,13 @@ if TYPE_CHECKING:
 COMMAND_STAGES = {
     'LOAD': [
         {
-            'command': SendCommand.Request.START_INFERENCE,
+            'command': SendCommandSrv.Request.START_INFERENCE,
             'target_phase': InferenceStatus.INFERENCING,
             'timeout': 600.0,
             'with_task_info': True,
         },
         {
-            'command': SendCommand.Request.STOP_INFERENCE,
+            'command': SendCommandSrv.Request.STOP_INFERENCE,
             'target_phase': InferenceStatus.PAUSED,
             'timeout': 5.0,
             'with_task_info': False,
@@ -70,7 +70,7 @@ COMMAND_STAGES = {
     ],
     'RESUME': [
         {
-            'command': SendCommand.Request.RESUME_INFERENCE,
+            'command': SendCommandSrv.Request.RESUME_INFERENCE,
             'target_phase': InferenceStatus.INFERENCING,
             'timeout': 10.0,
             'with_task_info': True,
@@ -78,7 +78,7 @@ COMMAND_STAGES = {
     ],
     'STOP': [
         {
-            'command': SendCommand.Request.STOP_INFERENCE,
+            'command': SendCommandSrv.Request.STOP_INFERENCE,
             'target_phase': InferenceStatus.PAUSED,
             'timeout': 5.0,
             'with_task_info': False,
@@ -86,7 +86,7 @@ COMMAND_STAGES = {
     ],
     'CLEAR': [
         {
-            'command': SendCommand.Request.FINISH,
+            'command': SendCommandSrv.Request.FINISH,
             'target_phase': InferenceStatus.READY,
             'timeout': 10.0,
             'with_task_info': False,
@@ -97,8 +97,12 @@ COMMAND_STAGES = {
 SERVICE_CALL_TIMEOUT_SEC = 30.0
 
 
-class SendCommandAction(BaseAction):
-    """Run one BT inference command (LOAD / RESUME / STOP / CLEAR)."""
+class SendCommand(BaseAction):
+    """Drive the orchestrator inference pipeline through lifecycle commands.
+
+    LOAD starts and pauses a policy, RESUME starts ticking a loaded policy,
+    STOP pauses without unloading, and CLEAR finishes and unloads.
+    """
 
     _STATE_INIT = 'init'
     _STATE_BEGIN_STAGE = 'begin_stage'
@@ -106,6 +110,24 @@ class SendCommandAction(BaseAction):
     _STATE_CALLING = 'calling'
     _STATE_WAITING_PHASE = 'waiting_phase'
     _STATE_DONE = 'done'
+
+    @classmethod
+    def from_xml_params(cls, context, name: str, params: dict):
+        task_instruction = params.get('task_instruction', '')
+        if isinstance(task_instruction, list):
+            task_instruction = ', '.join(task_instruction)
+        action = cls(
+            node=context.node,
+            command=params.get('command', 'LOAD'),
+            model=params.get('model', 'groot'),
+            policy_path=params.get('policy_path', ''),
+            task_instruction=task_instruction,
+            inference_hz=params.get('inference_hz', 15),
+            control_hz=params.get('control_hz', 100),
+            chunk_align_window_s=params.get('chunk_align_window_s', 0.3),
+        )
+        action.name = name
+        return action
 
     def __init__(
         self,
@@ -115,7 +137,7 @@ class SendCommandAction(BaseAction):
         # Internally this rides on TaskInfo.service_type, which the
         # orchestrator's _determine_service_prefix reads to pick the
         # backend container ("groot" / "lerobot" / ...).
-        model: str = '',
+        model: str = 'groot',
         policy_path: str = '',
         task_instruction: str = '',
         inference_hz: int = 15,
@@ -134,7 +156,7 @@ class SendCommandAction(BaseAction):
             float(chunk_align_window_s) if chunk_align_window_s else 0.0
         )
 
-        self._client = self.node.create_client(SendCommand, service_name)
+        self._client = self.node.create_client(SendCommandSrv, service_name)
 
         self._latest_phase = None
         self._latest_error = ''
@@ -205,7 +227,7 @@ class SendCommandAction(BaseAction):
                     return NodeStatus.FAILURE
                 return NodeStatus.RUNNING
 
-            req = SendCommand.Request()
+            req = SendCommandSrv.Request()
             req.command = self._stage['command']
             if self._stage['with_task_info']:
                 req.task_info = self._build_task_info()
@@ -315,3 +337,6 @@ class SendCommandAction(BaseAction):
         self._service_wait_started = None
         self._phase_deadline = None
         self._reset_phase_cache()
+
+
+SendCommandAction = SendCommand
