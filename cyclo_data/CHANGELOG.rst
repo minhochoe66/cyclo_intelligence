@@ -2,6 +2,16 @@
 Changelog for package cyclo_data
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
+0.1.2 (2026-05-19)
+------------------
+* Optimized LeRobot video conversion by streaming selected MP4 frames directly into ffmpeg instead of writing temporary JPEG sequences.
+* Reused synced-video cache entries with stronger frame-index, source-file, fps, resize, and rotation validation.
+* Cached video statistics during streaming sync to avoid later random MP4 sampling when possible.
+* Shared parsed episode data when converting LeRobot v2.1 and v3.0 together to avoid duplicate rosbag parsing.
+* Added a fast path for single-episode LeRobot v3.0 video aggregation.
+* Added regression tests for streaming video sync frame counts, duplicate frames, resize/rotation, fallback behavior, and cache invalidation.
+* Contributors: kimtaehyeong99
+
 0.1.1 (2026-05-15)
 ------------------
 * Stabilized VideoRecorder shutdown and resource lifecycle for repeated START/STOP recording.

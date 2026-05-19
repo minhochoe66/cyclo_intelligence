@@ -2,6 +2,12 @@
 Changelog for package cyclo-ui
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
+0.1.2 (2026-05-19)
+------------------
+* Added Cyclo Manager shortcuts and navigation.
+* Added light/dark theme controls and supporting UI styles.
+* Contributors: kimtaehyeong99
+
 0.1.1 (2026-05-15)
 ------------------
 * None
