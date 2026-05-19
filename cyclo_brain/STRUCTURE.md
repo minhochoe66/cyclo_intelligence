@@ -1,13 +1,13 @@
 # cyclo_brain — Target Structure
 
-`cyclo_brain`은 **2개 Python process**로 구성한다.
-각 process 안의 기능은 여러 class/module로 나눈다.
+`cyclo_brain` consists of **two Python processes**.
+Each process is split internally into multiple classes/modules.
 
 - Visual map: [`cyclo_brain/docs/architecture.html`](docs/architecture.html)
-- Rule: runtime 구조가 바뀌면 이 파일은 설명 기준으로, `cyclo_brain/docs/architecture.html`은 시각화 기준으로 함께 업데이트한다.
+- Rule: when the runtime structure changes, update this file as the textual reference and `cyclo_brain/docs/architecture.html` as the visual reference.
 
-- **Main process**: service, session, command publish, control loop를 조율한다.
-- **Engine process**: 모델 로딩, inference 실행, inference용 sensor/state 구독을 맡는다.
+- **Main process**: coordinates services, sessions, command publishing, and the control loop.
+- **Engine process**: owns model loading, inference execution, and inference-time sensor/state subscriptions.
 
 ---
 
@@ -301,12 +301,10 @@ policy/<backend>/
     └── prediction.py               # model input → action_list
 ```
 
-`common/runtime/engine.py`의 `InferenceEngine` ABC가 필수 process-boundary 계약이다.
-`loading.py`, `optimization.py`, `preprocessing.py`, `prediction.py`는 backend 내부 표준 레이아웃이며,
-별도 abstract를 강제하지 않는다.
+The `InferenceEngine` ABC in `common/runtime/engine.py` is the required process-boundary contract.
+`loading.py`, `optimization.py`, `preprocessing.py`, and `prediction.py` are the standard backend-internal layout, but they do not require separate abstract base classes.
 
-`optimization.py`는 선택 영역이다. TensorRT/GPU/runtime 최적화가 필요 없는 backend는
-no-op으로 두거나 파일을 생략할 수 있다.
+`optimization.py` is optional. Backends that do not need TensorRT/GPU/runtime optimization can keep it as a no-op or omit the file.
 
 ### 5.4 Action list contract
 

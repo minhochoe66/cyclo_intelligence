@@ -1,41 +1,41 @@
 ---
 title: Cyclo Brain Inference Manual
-description: Cyclo Intelligence UI에서 Cyclo Brain LeRobot/GR00T inference runtime을 준비하고 실행하는 방법
+description: How to prepare and run the Cyclo Brain LeRobot/GR00T inference runtime from the Cyclo Intelligence UI
 ---
 
 # Cyclo Brain Inference Manual
 
-이 문서는 Cyclo Intelligence UI에서 Cyclo Brain inference를 실행하는 절차를 설명한다. 대상은 이번 개편 이후의 구조다.
+This document explains how to run Cyclo Brain inference from the Cyclo Intelligence UI. It describes the runtime after the recent inference architecture refactor.
 
-- Cyclo Brain policy backend는 `main-runtime`과 `engine-process` 두 Python process로 동작한다.
-- UI는 LeRobot ACT와 GR00T N1.7을 하나의 Inference 화면에서 선택한다.
-- Docker backend는 UI에서 `ON`, `Restart`, `OFF`로 관리한다.
-- 모델은 Hugging Face repo ID 또는 policy checkpoint dropbox 경로로 지정할 수 있다.
+- Cyclo Brain policy backends run as two Python processes: `main-runtime` and `engine-process`.
+- The UI selects LeRobot ACT and GR00T N1.7 from the same Inference page.
+- Docker backends are controlled from the UI with `ON`, `Restart`, and `OFF`.
+- Models can be selected by Hugging Face repo ID or by a local policy checkpoint dropbox path.
 
 ![Cyclo Brain Architecture](./assets/cyclo-brain-inference/05-cyclo-brain-architecture.png)
 
-## 1. Runtime 구조
+## 1. Runtime Architecture
 
-Cyclo Brain은 policy container 안에서 두 process를 분리한다.
+Cyclo Brain splits each policy container into two processes.
 
-| Process | 역할 |
+| Process | Responsibility |
 | --- | --- |
-| `main-runtime` | 외부 inference command를 받는다. session 상태를 관리하고, action chunk buffer에서 action을 하나씩 꺼내 robot command topic으로 publish한다. |
-| `engine-process` | policy model을 load하고, robot observation을 읽고, action chunk를 계산한다. robot command는 publish하지 않는다. |
+| `main-runtime` | Receives external inference commands, owns session state, pops one action at a time from the action chunk buffer, and publishes robot command topics. |
+| `engine-process` | Loads the policy model, reads robot observations, and computes action chunks. It never publishes robot commands. |
 
-흐름은 다음과 같다.
+The runtime flow is:
 
-1. UI 또는 orchestrator가 `LOAD`, `START`, `STOP`, `UNLOAD` 계열 command를 보낸다.
-2. `main-runtime`이 command를 받아 session 상태를 갱신한다.
-3. `main-runtime`이 내부 Zenoh service로 `engine-process`에 model load 또는 action 계산을 요청한다.
-4. `engine-process`가 observation을 읽고 model inference를 실행해 `action_list`를 반환한다.
-5. `main-runtime`이 `ActionChunkProcessor`에 action chunk를 넣고, control loop에서 한 tick에 하나씩 publish한다.
+1. The UI or orchestrator sends `LOAD`, `START`, `STOP`, or `UNLOAD` style commands.
+2. `main-runtime` receives the command and updates the session state.
+3. `main-runtime` asks `engine-process` to load a model or compute actions through an internal Zenoh service.
+4. `engine-process` reads observations, runs model inference, and returns an `action_list`.
+5. `main-runtime` pushes the action chunk into `ActionChunkProcessor`, then publishes one action per control-loop tick.
 
-이 구조 덕분에 LeRobot과 GR00T는 같은 runtime contract를 공유한다. 다른 점은 engine 내부의 model load, preprocessing, prediction 구현뿐이다.
+LeRobot and GR00T share the same runtime contract. Only the engine-side model loading, preprocessing, and prediction implementation differs.
 
-## 2. UI 접속
+## 2. Open the UI
 
-로봇에서는 보통 다음 경로에서 실행한다.
+On the robot, start from the repository root:
 
 ```bash
 cd /home/robotis/cyclo_intelligence
@@ -43,54 +43,54 @@ git pull
 ./docker/container.sh start
 ```
 
-브라우저에서 다음 주소로 접속한다.
+Open the UI in a browser:
 
 ```text
 http://<robot-ip>/
 ```
 
-로컬에서 보고 있다면 다음 주소를 사용한다.
+For local access:
 
 ```text
 http://127.0.0.1/
 ```
 
-처음 접속하면 Home 화면에서 robot type을 먼저 선택한다.
+On the Home page, select the robot type first.
 
 ![Home Robot Type](./assets/cyclo-brain-inference/01-home-robot-type.png)
 
-1. `Refresh Robot Type List`로 사용 가능한 robot config를 읽는다.
-2. `Select Robot Type`에서 현재 로봇을 선택한다.
-3. `Set Robot Type`을 눌러 orchestrator와 policy runtime이 같은 robot config를 쓰도록 한다.
-4. 왼쪽 sidebar에서 `Inference`를 누른다.
+1. Press `Refresh Robot Type List` to load available robot configs.
+2. Select the current robot in `Select Robot Type`.
+3. Press `Set Robot Type` so the orchestrator and policy runtime use the same robot config.
+4. Click `Inference` in the left sidebar.
 
-## 3. Inference 화면 구성
+## 3. Inference Page Layout
 
 ![Inference ACT Setup](./assets/cyclo-brain-inference/02-inference-act-setup.png)
 
-Inference 화면은 크게 네 영역으로 나뉜다.
+The Inference page has four main areas.
 
-| 영역 | 설명 |
+| Area | Description |
 | --- | --- |
-| 좌측 sidebar | Home, Record, Training, Inference, BT Manager, Data Tools, Replay 화면 이동 |
-| 상단 상태바 | robot type, ROS 연결 상태, CPU/RAM/Storage 상태, Inference control buttons |
-| 중앙 view | camera image, 3D viewer, topic monitor |
-| 우측 Task Information | model 선택, Docker backend 제어, policy path, inference/control 설정 |
+| Left sidebar | Navigation: Home, Record, Training, Inference, BT Manager, Data Tools, Replay |
+| Top status bar | Robot type, ROS connection state, CPU/RAM/Storage state, and inference control buttons |
+| Center view | Camera images, 3D viewer, and topic monitor |
+| Right Task Information panel | Model selection, Docker backend control, policy path, and inference/control settings |
 
-## 4. Model 선택
+## 4. Model Selection
 
-`Task Information > Model`에서 사용할 policy backend를 고른다.
+Choose the policy backend from `Task Information > Model`.
 
 ![Model List](./assets/cyclo-brain-inference/03-inference-model-list-coming-soon.png)
 
-현재 실행 가능한 모델은 다음과 같다.
+Currently available models:
 
-| Model | Backend | 설명 |
+| Model | Backend | Description |
 | --- | --- | --- |
-| `LeRobot (ACT)` | `lerobot_server` | LeRobot ACT checkpoint를 load한다. task instruction은 사용하지 않는다. |
-| `GR00T N1.7` | `groot_server` | NVIDIA Isaac GR00T N1.7 checkpoint를 load한다. task instruction을 사용한다. |
+| `LeRobot (ACT)` | `lerobot_server` | Loads a LeRobot ACT checkpoint. It does not use task instructions. |
+| `GR00T N1.7` | `groot_server` | Loads an NVIDIA Isaac GR00T N1.7 checkpoint. It uses task instructions. |
 
-다음 항목은 UI에 `Coming Soon`으로 표시된다. 아직 선택할 수 없고, 추후 runtime 검증 후 활성화한다.
+The following models are shown as `Coming Soon`. They are visible in the UI but cannot be selected until their runtime path is validated.
 
 - `GreenVLA`
 - `OpenPI`
@@ -98,138 +98,138 @@ Inference 화면은 크게 네 영역으로 나뉜다.
 
 ## 5. Docker Backend Control
 
-Model을 선택하면 우측 패널에 해당 backend Docker control이 나타난다.
+After selecting a model, the matching Docker backend control appears in the right panel.
 
-| 버튼 | 동작 |
+| Button | Behavior |
 | --- | --- |
-| `ON` | policy container가 없으면 local image로 생성/시작한다. container가 멈춰 있으면 다시 시작한다. 이미 running이면 runtime reset을 위해 재시작한다. |
-| `Restart` | policy container를 재시작한다. model load 실패, stale service, CUDA memory 정리 후 다시 시도할 때 사용한다. |
-| `OFF` | policy container를 stop한다. container와 image는 삭제하지 않는다. |
+| `ON` | Creates/starts the policy container from a local image if it does not exist. Starts a stopped container. Restarts an already running container to reset the runtime. |
+| `Restart` | Restarts the policy container. Use this after model-load failures, stale services, or CUDA memory cleanup needs. |
+| `OFF` | Stops the policy container. It does not delete the container or image. |
 
-상태 badge의 의미는 다음과 같다.
+Status badges:
 
-| 상태 | 의미 |
+| State | Meaning |
 | --- | --- |
-| `Running` | Docker container가 running 상태다. |
-| `Stopped` | container는 있지만 실행 중이 아니다. |
-| `Not created` | container가 아직 생성되지 않았다. `ON`을 누르면 local image가 있을 때 생성된다. |
-| `Image missing` | 필요한 Docker image가 local에 없다. 먼저 image를 pull하거나 설치해야 한다. |
-| `Warming up` | container는 running이지만 runtime process readiness 대기 중이다. |
+| `Running` | The Docker container is running. |
+| `Stopped` | The container exists but is not running. |
+| `Not created` | The container has not been created yet. Press `ON` to create it when the local image exists. |
+| `Image missing` | The required Docker image is not available locally. Pull or install the image first. |
+| `Warming up` | The container is running, but runtime process readiness is still being checked. |
 
-Process 상태는 두 개가 표시된다.
+Two process states are shown.
 
-| Process | `Up` 의미 | `Down` 또는 `Unknown`일 때 |
+| Process | `Up` means | If `Down` or `Unknown` |
 | --- | --- | --- |
-| `Main` | `main-runtime` s6 service가 살아 있다. 외부 inference command와 control loop를 담당한다. | `Restart`를 눌러 backend를 다시 띄운다. |
-| `Engine` | `engine-process` s6 service가 살아 있다. model load와 action chunk inference를 담당한다. | model load 또는 inference service가 응답하지 않을 수 있으므로 `Restart`가 우선이다. |
+| `Main` | The `main-runtime` s6 service is alive. It handles external inference commands and the control loop. | Press `Restart` to bring the backend up again. |
+| `Engine` | The `engine-process` s6 service is alive. It handles model loading and action chunk inference. | Model load or inference service calls may fail; use `Restart` first. |
 
-`Main Up`, `Engine Up`은 process 생존 상태다. model이 이미 load되었다는 뜻은 아니다. model load는 `Start`를 누른 뒤 `Policy Path`를 기준으로 별도로 수행된다.
+`Main Up` and `Engine Up` only mean the processes are alive. They do not mean a model is already loaded. Model loading happens after pressing `Start`, using the current `Policy Path`.
 
-## 6. ACT 모델 실행 플로우
+## 6. ACT Inference Flow
 
-ACT는 LeRobot backend를 사용한다.
+ACT uses the LeRobot backend.
 
-1. `Model`을 `LeRobot (ACT)`로 선택한다.
-2. `ACT Docker`가 `Running`인지 확인한다.
-3. `Main`과 `Engine`이 모두 `Up`인지 확인한다.
-4. `Policy Path`에 모델 경로를 입력한다.
+1. Select `LeRobot (ACT)` in `Model`.
+2. Check that `ACT Docker` is `Running`.
+3. Check that both `Main` and `Engine` are `Up`.
+4. Enter the model path in `Policy Path`.
 
-예시 Hugging Face repo ID:
+Example Hugging Face repo ID:
 
 ```text
 Dongkkka/Act_test_20k
 ```
 
-예시 local checkpoint path:
+Example local checkpoint path:
 
 ```text
 /policy_checkpoints/lerobot/Act_test_20k
 ```
 
-5. `Inference Hz`를 모델 action 생성 주기에 맞춘다. ACT 테스트 모델은 보통 `15`를 사용한다.
-6. `Control Hz`를 robot command publish 주기에 맞춘다. 기본값은 `100`이다.
-7. `Max Skip Ahead (s)`는 chunk aligner가 앞쪽 action을 건너뛸 수 있는 시간 창이다. 기본값 `0.3`부터 시작한다.
-8. 상단 `Start` 버튼을 누른다.
-9. 상태가 `Loading model...`에서 `Inferencing`으로 바뀌면 action publish가 시작된다.
-10. 잠시 멈추려면 `Stop`을 누른다. model은 unload하지 않고 pause/resume 용도로 유지한다.
-11. 완전히 종료하고 model과 buffer를 정리하려면 `Clear`를 누른다.
+5. Set `Inference Hz` to match the model action generation rate. The ACT test model usually uses `15`.
+6. Set `Control Hz` to match the robot command publish rate. The default is `100`.
+7. `Max Skip Ahead (s)` is the time window where the chunk aligner may skip ahead. Start with the default `0.3`.
+8. Press the top `Start` button.
+9. When the status changes from `Loading model...` to `Inferencing`, action publishing has started.
+10. Press `Stop` to pause. The model remains loaded for pause/resume.
+11. Press `Clear` to fully stop inference and clear the model/session/buffer state.
 
-ACT는 task instruction을 쓰지 않으므로 `Task Instruction` 입력창이 표시되지 않는다.
+ACT does not use task instructions, so the `Task Instruction` input is hidden.
 
-## 7. GR00T N1.7 모델 실행 플로우
+## 7. GR00T N1.7 Inference Flow
 
-GR00T는 GR00T backend를 사용한다.
+GR00T uses the GR00T backend.
 
 ![Inference GR00T Setup](./assets/cyclo-brain-inference/04-inference-groot-instruction.png)
 
-1. `Model`을 `GR00T N1.7`로 선택한다.
-2. `GR00T Docker`가 `Running`인지 확인한다.
-3. `Main`과 `Engine`이 모두 `Up`인지 확인한다.
-4. `Task Instruction`에 자연어 작업 지시를 입력한다.
-5. `Policy Path`에 모델 경로를 입력한다.
+1. Select `GR00T N1.7` in `Model`.
+2. Check that `GR00T Docker` is `Running`.
+3. Check that both `Main` and `Engine` are `Up`.
+4. Enter a natural-language task instruction in `Task Instruction`.
+5. Enter the model path in `Policy Path`.
 
-예시 Hugging Face repo ID:
+Example Hugging Face repo ID:
 
 ```text
 Dongkkka/cyclo_intelligence_groot_n1.7_model
 ```
 
-예시 local checkpoint path:
+Example local checkpoint path:
 
 ```text
 /policy_checkpoints/groot/cyclo_intelligence_groot_n1.7_model
 ```
 
-6. `Start`를 누른다.
-7. inference 중 task instruction을 바꾸고 싶으면 입력창을 수정한 뒤 `Update Task Instruction`을 누른다.
-8. pause는 `Stop`, 완전 정리는 `Clear`를 사용한다.
+6. Press `Start`.
+7. To update the task instruction during inference, edit the text and press `Update Task Instruction`.
+8. Use `Stop` to pause and `Clear` to fully unload/clear the session.
 
-현재 GR00T N1.7 Docker는 기본적으로 PyTorch eager inference로 실행한다. TensorRT action-head 경로는 별도 검증용이며, UI 기본 실행 경로는 안정성을 우선한다.
+GR00T N1.7 currently runs in PyTorch eager mode by default in the UI path. TensorRT action-head execution is a separate validation path; the UI default prioritizes stable runtime behavior.
 
 ## 8. Inference Control Buttons
 
-상단 `Inference` control bar는 모든 backend에서 공통이다.
+The top `Inference` control bar is shared by all backends.
 
-| 버튼 | 단축키 | 설명 |
+| Button | Shortcut | Description |
 | --- | --- | --- |
-| `Start` | `Space` | READY 상태에서는 model load 후 inference를 시작한다. PAUSED 상태이고 policy path가 같으면 resume으로 동작한다. |
-| `Stop` | `Ctrl+Shift+S` | inference를 pause한다. model은 memory에 유지된다. |
-| `Clear` | `Esc` | inference를 종료하고 model, session, action buffer를 정리한다. |
-| `Record` | `R` | `Record` checkbox가 enabled일 때 inference 결과를 기록하기 시작한다. |
-| `Save` | `R` | recording 중일 때 현재 inference recording을 저장한다. |
-| `Discard` | - | recording 중일 때 현재 inference recording을 버린다. |
+| `Start` | `Space` | In READY state, loads the model and starts inference. In PAUSED state with the same policy path, resumes inference. |
+| `Stop` | `Ctrl+Shift+S` | Pauses inference. The model remains in memory. |
+| `Clear` | `Esc` | Stops inference and clears the model, session, and action buffer. |
+| `Record` | `R` | Starts recording inference results when the `Record` checkbox is enabled. |
+| `Save` | `R` | Saves the current inference recording. |
+| `Discard` | - | Discards the current inference recording. |
 
-`Start`가 비활성화되어 있으면 우측 Docker backend 상태를 먼저 본다. 보통 원인은 backend가 `OFF`, `Image missing`, 또는 `Warming up` 상태인 경우다.
+If `Start` is disabled, check the Docker backend status in the right panel. Common causes are `OFF`, `Image missing`, or `Warming up`.
 
-## 9. 모델 파일 위치
+## 9. Model File Locations
 
-Docker compose는 host의 checkpoint directory를 policy container 안으로 bind mount한다.
+Docker Compose bind-mounts host checkpoint directories into each policy container.
 
 | Backend | Host path | Container path |
 | --- | --- | --- |
 | LeRobot | `/home/robotis/cyclo_intelligence/cyclo_brain/policy/lerobot/checkpoints` | `/policy_checkpoints/lerobot` |
 | GR00T | `/home/robotis/cyclo_intelligence/cyclo_brain/policy/groot/checkpoints` | `/policy_checkpoints/groot` |
 
-따라서 host에 다음처럼 모델을 두면:
+If the host model is here:
 
 ```text
 /home/robotis/cyclo_intelligence/cyclo_brain/policy/lerobot/checkpoints/Act_test_20k
 ```
 
-UI에는 다음처럼 입력한다.
+Enter this path in the UI:
 
 ```text
 /policy_checkpoints/lerobot/Act_test_20k
 ```
 
-Hugging Face repo ID를 직접 입력할 수도 있다.
+You can also enter a Hugging Face repo ID directly.
 
 ```text
 Dongkkka/Act_test_20k
 Dongkkka/cyclo_intelligence_groot_n1.7_model
 ```
 
-모델을 미리 다운로드하고 싶으면 각 policy container 안에서 `snapshot_download`를 사용한다.
+To pre-download a model, run `snapshot_download` inside the matching policy container.
 
 LeRobot ACT:
 
@@ -257,15 +257,15 @@ snapshot_download(
 PY
 ```
 
-Hugging Face cache는 compose 기준으로 다음 host directory에 남는다.
+The Hugging Face cache remains under this host directory in the Compose setup:
 
 ```text
 /home/robotis/cyclo_intelligence/docker/huggingface
 ```
 
-## 10. Docker image 준비
+## 10. Docker Image Preparation
 
-정상 실행을 위해 local Docker image가 있어야 한다.
+A local Docker image is required for normal operation.
 
 LeRobot:
 
@@ -279,42 +279,42 @@ GR00T:
 docker pull robotis/groot-zenoh:1.2.0-arm64
 ```
 
-로컬 개발 중 release tag 대신 임시 tag가 있을 수 있다. LeRobot은 `robotis/lerobot-zenoh:arm64`도 local image 후보로 인식한다. GR00T는 release tag `1.2.0-arm64`를 기준으로 맞춘다.
+During local development, LeRobot may also exist with the temporary tag `robotis/lerobot-zenoh:arm64`; the supervisor accepts it as a local image candidate. GR00T is expected to use the release tag `1.2.0-arm64`.
 
 ## 11. Troubleshooting
 
-### Start가 눌리지 않는다
+### Start Is Disabled
 
-우측 backend 상태를 확인한다.
+Check the backend status in the right panel.
 
-- `Image missing`: Docker image를 pull한다.
-- `Stopped` 또는 `Not created`: `ON`을 누른다.
-- `Warming up`: `Main`, `Engine`이 `Up`이 될 때까지 기다린다.
-- `Main Down` 또는 `Engine Down`: `Restart`를 누른다.
+- `Image missing`: pull the Docker image.
+- `Stopped` or `Not created`: press `ON`.
+- `Warming up`: wait until both `Main` and `Engine` are `Up`.
+- `Main Down` or `Engine Down`: press `Restart`.
 
-### model load가 실패했다
+### Model Load Failed
 
-1. `Policy Path`가 맞는지 확인한다.
-2. local path를 쓴다면 container path(`/policy_checkpoints/...`)를 입력했는지 확인한다.
-3. Hugging Face repo ID를 쓴다면 network와 token 권한을 확인한다.
-4. `Clear`를 눌러 session을 정리한다.
-5. 그래도 실패하면 Docker backend `Restart` 후 다시 `Start`한다.
+1. Check that `Policy Path` is correct.
+2. If you use a local path, make sure it is a container path such as `/policy_checkpoints/...`.
+3. If you use a Hugging Face repo ID, check network access and token permissions.
+4. Press `Clear` to reset the session.
+5. If it still fails, press Docker backend `Restart`, then press `Start` again.
 
-### action이 이상하거나 robot command가 나오지 않는다
+### Actions Look Wrong or Robot Commands Are Missing
 
-1. Topic Monitor에서 camera, joint state, command topic 상태를 확인한다.
-2. `Inference Hz`가 학습 데이터 fps와 맞는지 확인한다.
-3. `Control Hz`가 robot command publish 주기와 맞는지 확인한다.
-4. ACT/GR00T model이 기대하는 camera key와 현재 robot config가 맞는지 확인한다.
-5. `Clear` 후 다시 시작한다.
+1. Check camera, joint state, and command topic status in Topic Monitor.
+2. Check that `Inference Hz` matches the training data FPS.
+3. Check that `Control Hz` matches the robot command publish rate.
+4. Check that the ACT/GR00T model's expected camera keys match the current robot config.
+5. Press `Clear`, then start again.
 
-### Docker OFF 후 다시 켜고 싶다
+### Turn Docker Back On After OFF
 
-`OFF`는 container를 삭제하지 않는다. 다시 `ON`을 누르면 기존 container를 재사용해 시작한다. 완전히 새 container가 필요하면 CLI에서 compose 또는 docker 명령으로 기존 container를 삭제한 뒤 다시 생성한다.
+`OFF` stops the container but does not delete it. Press `ON` to reuse and start the existing container. If you need a fresh container, delete the old container with CLI Docker/Compose commands and create it again.
 
-## 12. 문서 이미지 경로
+## 12. Documentation Image Paths
 
-VitePress로 옮길 때 이 문서가 참조하는 이미지는 다음 위치에 있다.
+This document uses the following images, which can be moved into the VitePress site later.
 
 ```text
 docs/assets/cyclo-brain-inference/01-home-robot-type.png
