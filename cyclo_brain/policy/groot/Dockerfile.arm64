@@ -186,8 +186,10 @@ ENV PYTHONPATH=/app:/gr00t
 WORKDIR /gr00t
 
 HEALTHCHECK --interval=30s --timeout=10s --start-period=30s --retries=3 \
-    CMD /command/s6-svstat /run/service/main-runtime 2>&1 | grep -q "up" \
-     && /command/s6-svstat /run/service/engine-process 2>&1 | grep -q "up" \
+    CMD S6_SVSTAT="$(ls /package/admin/s6-*/command/s6-svstat 2>/dev/null | head -1)" \
+     && [ -n "$S6_SVSTAT" ] \
+     && "$S6_SVSTAT" /run/service/main-runtime 2>&1 | grep -q "up" \
+     && "$S6_SVSTAT" /run/service/engine-process 2>&1 | grep -q "up" \
      || exit 1
 
 ENTRYPOINT ["/init"]
