@@ -1,4 +1,4 @@
-# Build context hygiene — keep the GR00T image build deterministic
+# Build context hygiene — keep the LeRobot image build deterministic
 # and prevent accidental host-side scratch dirs from bleeding into the
 # image. Runtime data lives on the compose-mounted ./workspace
 # (host: docker/workspace/), shared with cyclo_intelligence and
@@ -13,9 +13,8 @@ __pycache__/
 .cache/
 *.log
 
-# Submodule build artifacts (Isaac-GR00T builds inside the image,
-# not from host-side outputs)
-Isaac-GR00T/.venv/
-Isaac-GR00T/build/
-Isaac-GR00T/dist/
-Isaac-GR00T/*.egg-info/
+# Submodule build artifacts
+lerobot/.venv/
+lerobot/build/
+lerobot/dist/
+lerobot/*.egg-info/
