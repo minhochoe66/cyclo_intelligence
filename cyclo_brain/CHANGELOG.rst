@@ -2,7 +2,7 @@
 Changelog for package cyclo_brain
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
-0.1.2 (2026-05-20)
+0.1.4 (2026-05-22)
 ------------------
 * Added the shared two-process policy runtime with ``main-runtime`` and ``engine-process`` services.
 * Refactored LeRobot and GR00T backends onto the shared runtime, replacing the backend-local inference server and control publisher split.
@@ -14,6 +14,14 @@ Changelog for package cyclo_brain
 * Added runtime architecture documentation, policy runtime contracts, fake robot publisher, and inference verification scripts.
 * Fixed GR00T ``odometry`` action key routing to the configured ``mobile`` / ``/cmd_vel`` command topic.
 * Contributors: Dongyun Kim
+
+0.1.3 (2026-05-22)
+------------------
+* None
+
+0.1.2 (2026-05-20)
+------------------
+* None
 
 0.1.1 (2026-05-15)
 ------------------

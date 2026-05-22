@@ -31,7 +31,7 @@ import { useRosServiceCaller } from '../../../hooks/useRosServiceCaller';
 import FileBrowserModal from '../../../components/FileBrowserModal';
 import TokenInputPopup from '../../../components/TokenInputPopup';
 import SectionSelector from './SectionSelector';
-import { DEFAULT_PATHS, HF_ENDPOINT_PRESETS } from '../../../constants/paths';
+import { HF_ENDPOINT_PRESETS } from '../../../constants/paths';
 import HFStatus from '../../../constants/HFStatus';
 import {
   DOWNLOAD_MODEL_BACKENDS,
