@@ -189,7 +189,10 @@ class DataManager:
         self._subtask_instructions = self._get_subtask_instructions(task_info)
         self._subtask_mode = bool(self._subtask_instructions)
         self._subtask_total = len(self._subtask_instructions)
+        self._physical_segment_total = max(1, self._subtask_total)
+        self._segmented_storage_mode = True
         self._single_task = not self._subtask_mode
+        self._validate_existing_segment_count()
         # Per-recording opt-in flag from the UI checkbox; getattr guards
         # against TaskInfo messages built before the field was added.
         self._include_robotis_license = bool(
@@ -255,8 +258,54 @@ class DataManager:
             for part in path.parts
         )
 
+    def _existing_episode_segment_counts(self) -> set[int]:
+        """Return semantic subtask counts already present in this task folder."""
+        root = Path(self._save_rosbag_path)
+        counts: set[int] = set()
+        if not root.exists():
+            return counts
+
+        for info_path in root.rglob('episode_info.json'):
+            try:
+                rel_parent = info_path.parent.relative_to(root)
+            except ValueError:
+                rel_parent = info_path.parent
+            if self._skip_scan_path(rel_parent):
+                continue
+            info = self._read_episode_info(info_path.parent)
+            mode = info.get('recording_mode')
+            if mode == 'single_segment':
+                counts.add(1)
+                continue
+            if mode == 'subtask':
+                try:
+                    counts.add(int(info.get('subtask_total', 1) or 1))
+                except (TypeError, ValueError):
+                    counts.add(1)
+                continue
+            segments = info.get('segments')
+            if isinstance(segments, list):
+                counts.add(len(segments))
+                continue
+            if self._is_rosbag_leaf(info_path.parent):
+                counts.add(0)
+        return counts
+
+    def _validate_existing_segment_count(self) -> None:
+        existing_counts = self._existing_episode_segment_counts()
+        if not existing_counts:
+            return
+        requested = self._physical_segment_total
+        if existing_counts == {requested}:
+            return
+        raise ValueError(
+            'Cannot mix subtask counts in one task folder: '
+            f'existing={sorted(existing_counts)}, requested={requested}. '
+            'Use a new task folder for a different Number of Subtasks.'
+        )
+
     def _iter_subtask_episode_dirs(self) -> list[Path]:
-        """Return all saved subtask rosbag dirs, old flat + new nested."""
+        """Return all saved raw segment rosbag dirs, old flat + new nested."""
         root = Path(self._save_rosbag_path)
         if not root.exists():
             return []
@@ -267,7 +316,7 @@ class DataManager:
             if self._skip_scan_path(rel_parent):
                 continue
             info = self._read_episode_info(info_path.parent)
-            if info.get('recording_mode') != 'subtask':
+            if info.get('recording_mode') not in {'subtask', 'single_segment'}:
                 continue
             matches.append(info_path.parent)
 
@@ -351,7 +400,7 @@ class DataManager:
 
     def _find_next_subtask_position(self) -> tuple[int, int]:
         """Find the next full-episode/subtask cursor from saved metadata."""
-        if not self._subtask_mode:
+        if not self._segmented_storage_mode:
             return self._record_episode_count, 0
 
         groups: dict[int, set[int]] = {}
@@ -361,7 +410,7 @@ class DataManager:
             try:
                 full_idx = int(info.get('full_episode_index', 0))
                 subtask_idx = int(info.get('subtask_index', 0))
-                total = int(info.get('subtask_total', self._subtask_total))
+                total = int(info.get('subtask_total', self._physical_segment_total))
             except (TypeError, ValueError):
                 continue
             groups.setdefault(full_idx, set()).add(subtask_idx)
@@ -381,7 +430,7 @@ class DataManager:
                 # that shape as a complete full episode so a recreated
                 # DataManager continues at the next numeric episode folder.
                 segments = info.get('segments')
-                if isinstance(segments, list) and segments:
+                if isinstance(segments, list):
                     try:
                         full_idx = int(info.get('episode_index'))
                     except (TypeError, ValueError):
@@ -395,7 +444,7 @@ class DataManager:
                     continue
                 try:
                     full_idx = int(info.get('full_episode_index', 0))
-                    total = int(info.get('subtask_total', self._subtask_total))
+                    total = int(info.get('subtask_total', self._physical_segment_total))
                 except (TypeError, ValueError):
                     continue
                 total = max(1, total)
@@ -406,7 +455,7 @@ class DataManager:
             return self._record_episode_count, 0
 
         for full_idx in sorted(groups):
-            total = totals.get(full_idx, self._subtask_total)
+            total = totals.get(full_idx, self._physical_segment_total)
             missing = [idx for idx in range(total) if idx not in groups[full_idx]]
             if missing:
                 return full_idx, missing[0]
@@ -472,16 +521,16 @@ class DataManager:
 
     def set_current_subtask_index(self, index: int):
         """Select the subtask slot that the next START should record."""
-        if not self._subtask_mode:
+        if not self._segmented_storage_mode:
             return
         with self._state_lock:
-            bounded = max(0, min(int(index), max(0, self._subtask_total - 1)))
+            bounded = max(0, min(int(index), max(0, self._physical_segment_total - 1)))
             self._current_subtask_index = bounded
             self._current_scenario_number = bounded
 
     def finish_full_episode(self):
         """Advance the full-episode cursor after all planned subtasks saved."""
-        if not self._subtask_mode:
+        if not self._segmented_storage_mode:
             return
         with self._state_lock:
             current_full = self._current_full_episode_index
@@ -511,7 +560,7 @@ class DataManager:
 
     def discard_saved_subtask(self, subtask_idx: int) -> int:
         """Delete saved raw episode dirs for one subtask in the active full episode."""
-        if not self._subtask_mode:
+        if not self._segmented_storage_mode:
             return 0
         with self._state_lock:
             full_idx = self._current_full_episode_index
@@ -527,7 +576,7 @@ class DataManager:
 
     def discard_current_full_episode(self) -> int:
         """Delete all saved raw subtask dirs for the active full episode."""
-        if not self._subtask_mode:
+        if not self._segmented_storage_mode:
             return 0
         with self._state_lock:
             full_idx = self._current_full_episode_index
@@ -577,7 +626,7 @@ class DataManager:
             return None  # Not recording
         if status == 'warmup':
             return None  # Legacy: Not ready yet
-        if self._subtask_mode:
+        if self._segmented_storage_mode:
             return str(self._subtask_rosbag_dir(full_episode, subtask))
         return self._save_rosbag_path + f'/{episode}'
 
@@ -591,7 +640,7 @@ class DataManager:
         return full_dir / 'segments' / str(subtask_idx)
 
     def _archive_full_episode(self, full_idx: int) -> None:
-        if not self._subtask_mode:
+        if not self._segmented_storage_mode:
             return
 
         subtask_dirs = self._episode_dirs_for_full_subtask(full_idx)
@@ -608,7 +657,7 @@ class DataManager:
             for path in subtask_dirs
         }
         missing = [
-            idx for idx in range(self._subtask_total)
+            idx for idx in range(self._physical_segment_total)
             if idx not in by_subtask
         ]
         if missing:
@@ -618,7 +667,7 @@ class DataManager:
 
         out_dir = self._full_episode_dir(full_idx)
         out_dir.mkdir(parents=True, exist_ok=True)
-        ordered = [by_subtask[idx] for idx in range(self._subtask_total)]
+        ordered = [by_subtask[idx] for idx in range(self._physical_segment_total)]
 
         for old_mcap in out_dir.glob('*.mcap'):
             old_mcap.unlink(missing_ok=True)
@@ -707,9 +756,15 @@ class DataManager:
                         'count': count,
                     }
             segment_end_s = segment_start_s + (segment_duration_ns / 1_000_000_000.0)
-            subtask_instruction = seg_info.get('subtask_instruction', '')
+            subtask_instruction = (
+                seg_info.get('subtask_instruction', '')
+                if self._subtask_mode
+                else self._main_task_instruction
+            )
             segments_meta.append({
-                'sub_task_instruction': subtask_instruction,
+                'sub_task_instruction': (
+                    subtask_instruction or self._main_task_instruction
+                ),
                 'frame_duration': [segment_start_s, segment_end_s],
             })
             segment_start_s = segment_end_s
@@ -761,9 +816,9 @@ class DataManager:
             'robot_type': self._robot_type,
             'device_serial': socket.gethostname(),
             'episode_index': full_idx,
-            'segments': segments_meta,
             'timestamp': time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime()),
             'format_version': 'robotis_v2',
+            'segments': segments_meta,
         }
         if video_warnings:
             summary['video_warnings'] = video_warnings
@@ -793,7 +848,7 @@ class DataManager:
                 shutil.rmtree(segments_root, ignore_errors=True)
         print(
             f'[ROBOTIS] Archived full episode {full_idx}: '
-            f'{len(ordered)} subtask(s), {len(output_files)} mcap file(s)'
+            f'{len(ordered)} segment(s), {len(output_files)} mcap file(s)'
         )
 
     @staticmethod
@@ -812,6 +867,80 @@ class DataManager:
                     shutil.rmtree(dst, ignore_errors=True)
                 shutil.copytree(src_camera_info, dst)
                 break
+
+    @staticmethod
+    def _write_camera_metadata(
+        episode_dir: Path,
+        *,
+        image_topics: dict | None = None,
+        camera_info_topics: dict | None = None,
+        camera_rotations: dict | None = None,
+    ) -> None:
+        """Persist record-time camera processing metadata beside CameraInfo.
+
+        Per-camera ``*.yaml`` files in ``camera_info/`` mirror ROS
+        CameraInfo calibration. This companion file records non-calibration
+        provenance from the robot config, especially rotation that is applied
+        while recording/transcoding raw video.
+        """
+        image_topics = dict(image_topics or {})
+        camera_info_topics = dict(camera_info_topics or {})
+        camera_rotations = dict(camera_rotations or {})
+        camera_names = sorted(
+            set(image_topics) | set(camera_info_topics) | set(camera_rotations)
+        )
+        if not camera_names:
+            return
+
+        cameras = {}
+        for name in camera_names:
+            entry = {
+                'rotation_deg': int(camera_rotations.get(name, 0) or 0),
+                'rotation_applied_at': 'record',
+            }
+            if name in image_topics:
+                entry['image_topic'] = image_topics[name]
+            if name in camera_info_topics:
+                entry['camera_info_topic'] = camera_info_topics[name]
+            cameras[name] = entry
+
+        payload = {
+            'format_version': 'robotis_camera_metadata_v1',
+            'source': 'robot_config',
+            'cameras': cameras,
+        }
+        metadata_path = episode_dir / 'camera_info' / 'camera_metadata.yaml'
+        try:
+            _atomic_write_text(
+                metadata_path,
+                yaml.safe_dump(
+                    payload,
+                    default_flow_style=False,
+                    sort_keys=False,
+                    allow_unicode=True,
+                ),
+            )
+        except Exception as exc:
+            print(f'[ROBOTIS] Failed to save camera metadata: {exc}')
+
+    @staticmethod
+    def _read_camera_metadata_rotations(episode_dir: Path) -> dict[str, int]:
+        metadata_path = episode_dir / 'camera_info' / 'camera_metadata.yaml'
+        if not metadata_path.exists():
+            return {}
+        try:
+            data = yaml.safe_load(metadata_path.read_text(encoding='utf-8')) or {}
+            cameras = data.get('cameras') or {}
+            if not isinstance(cameras, dict):
+                return {}
+            rotations: dict[str, int] = {}
+            for name, entry in cameras.items():
+                if not isinstance(entry, dict):
+                    continue
+                rotations[str(name)] = int(entry.get('rotation_deg', 0) or 0)
+            return rotations
+        except Exception:
+            return {}
 
     @staticmethod
     def _probe_mp4_dimensions(path: Path) -> tuple[int, int]:
@@ -906,6 +1035,7 @@ class DataManager:
         for subtask_idx, seg_dir in enumerate(subtask_dirs):
             prefix = f'{full_idx}_{subtask_idx}'
             seg_info = DataManager._read_episode_info(seg_dir)
+            camera_rotations = DataManager._read_camera_metadata_rotations(seg_dir)
             seg_videos = seg_dir / 'videos'
             expected_cameras = set()
             if seg_videos.exists():
@@ -934,10 +1064,7 @@ class DataManager:
                     DataManager._transcode_episode_video(
                         src,
                         dst,
-                        rotation_deg=int(
-                            (seg_info.get('camera_rotations') or {}).get(camera, 0)
-                            or 0
-                        ),
+                        rotation_deg=int(camera_rotations.get(camera, 0) or 0),
                         needs_pad=bool(width % 2 or height % 2),
                     )
                     sidecar = seg_videos / f'{camera}_timestamps.parquet'
@@ -1034,7 +1161,10 @@ class DataManager:
         self._subtask_instructions = self._get_subtask_instructions(task_info)
         self._subtask_mode = bool(self._subtask_instructions)
         self._subtask_total = len(self._subtask_instructions)
+        self._physical_segment_total = max(1, self._subtask_total)
+        self._segmented_storage_mode = True
         self._single_task = not self._subtask_mode
+        self._validate_existing_segment_count()
         self._include_robotis_license = bool(
             getattr(task_info, 'include_robotis_license', False)
         )
@@ -1100,6 +1230,8 @@ class DataManager:
         video_stats: dict | None = None,
         camera_info_files: dict | None = None,
         camera_rotations: dict | None = None,
+        image_topics: dict | None = None,
+        camera_info_topics: dict | None = None,
     ):
         """
         Save URDF and metadata for ROBOTIS format.
@@ -1171,30 +1303,33 @@ class DataManager:
             full_episode_index = self._current_full_episode_index
             subtask_index = self._current_subtask_index
         current_subtask_instruction = self._current_subtask_instruction()
+        camera_rotations = dict(camera_rotations or {})
+        image_topics = dict(image_topics or {})
+        camera_info_topics = dict(camera_info_topics or {})
+        self._write_camera_metadata(
+            Path(rosbag_path),
+            image_topics=image_topics,
+            camera_info_topics=camera_info_topics,
+            camera_rotations=camera_rotations,
+        )
 
         meta_data = {
             'task_instruction': self._main_task_instruction,
             'task_num': getattr(self._task_info, 'task_num', '') or '',
             'task_name': getattr(self._task_info, 'task_name', '') or '',
-            'recording_mode': 'subtask' if self._subtask_mode else 'single',
-            'subtask_storage_layout': 'nested' if self._subtask_mode else '',
+            'recording_mode': 'subtask' if self._subtask_mode else 'single_segment',
+            'subtask_storage_layout': 'nested',
             'subtask_instruction': current_subtask_instruction,
             'subtask_instructions': list(self._subtask_instructions),
-            'full_episode_index': full_episode_index if self._subtask_mode else raw_episode_index,
-            'subtask_index': subtask_index if self._subtask_mode else 0,
-            'subtask_total': self._subtask_total if self._subtask_mode else 0,
+            'full_episode_index': full_episode_index,
+            'subtask_index': subtask_index,
+            'subtask_total': self._physical_segment_total,
             'robot_type': self._robot_type,
             'episode_index': raw_episode_index,
             'timestamp': time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime()),
             'format_version': 'robotis_v2',
             'device_serial': socket.gethostname(),
             'video_stats': video_stats or {},
-            # ``camera_rotations`` is ``{cam_name: degrees}`` (0/90/180/270)
-            # straight from the robot config yaml. The background
-            # transcoder reads this when re-encoding to H.264 and applies
-            # ``-vf transpose=N`` so the stored MP4 has the correct
-            # orientation (e.g. wrist cameras mounted upside down at 270°).
-            'camera_rotations': dict(camera_rotations or {}),
             'transcoding_status': initial_status,
         }
 
@@ -1247,7 +1382,7 @@ class DataManager:
         current_status.current_task_instruction = self.current_instruction
         current_status.proceed_time = proceed_time
         current_status.current_episode_number = (
-            full_episode_index if self._subtask_mode else episode_count
+            full_episode_index if self._segmented_storage_mode else episode_count
         )
         current_status.current_subtask_index = subtask_index if self._subtask_mode else 0
         current_status.subtask_count = self._subtask_total if self._subtask_mode else 0

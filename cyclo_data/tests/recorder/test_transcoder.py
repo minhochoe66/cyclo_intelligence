@@ -38,6 +38,7 @@ import numpy as np
 import pyarrow as pa
 import pyarrow.parquet as pq
 import pytest
+import yaml
 
 
 # The tests import from cyclo_data — make the source tree importable
@@ -136,10 +137,27 @@ def _make_episode(
             "robot_type": "test_robot",
             "episode_index": 0,
             "format_version": "robotis_v2",
-            "camera_rotations": dict(rotations or {}),
             "transcoding_status": initial_status,
         }
         (ep / "episode_info.json").write_text(json.dumps(info, indent=2))
+    if rotations:
+        camera_info_dir = ep / "camera_info"
+        camera_info_dir.mkdir(parents=True, exist_ok=True)
+        payload = {
+            "format_version": "robotis_camera_metadata_v1",
+            "source": "robot_config",
+            "cameras": {
+                cam: {
+                    "rotation_deg": int(deg),
+                    "rotation_applied_at": "record",
+                }
+                for cam, deg in rotations.items()
+            },
+        }
+        (camera_info_dir / "camera_metadata.yaml").write_text(
+            yaml.safe_dump(payload, sort_keys=False),
+            encoding="utf-8",
+        )
     return ep
 
 

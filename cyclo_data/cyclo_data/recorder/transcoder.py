@@ -52,6 +52,7 @@ import time
 from typing import Callable, Dict, Iterable, Optional
 
 import pyarrow.parquet as pq
+import yaml
 
 
 _FFMPEG = shutil.which("ffmpeg") or "ffmpeg"
@@ -322,14 +323,12 @@ class TranscodeWorker:
         assert self._encoder is not None
         encoder_name, encoder_opts = self._encoder
 
-        # Pull camera_rotations from episode_info.json — the recorder
-        # stored these per camera from the yaml at save_robotis_metadata
-        # time. The values represent the physical sensor orientation
-        # offset (e.g. ``270`` for an upside-down wrist camera) and we
-        # apply ``-vf transpose=N`` to fix it during this single
-        # decode+encode pass instead of pushing the cost downstream.
-        rotations: Dict[str, int] = {}
-        if info_path.exists():
+        # Pull record-time camera rotations from camera_metadata.yaml.
+        # episode_info.json stays focused on task/episode semantics while
+        # camera_info/ owns camera provenance and calibration-adjacent data.
+        rotations = _read_camera_metadata_rotations(episode_dir)
+        if not rotations and info_path.exists():
+            # Legacy fallback for recordings made before camera_metadata.yaml.
             try:
                 with open(info_path) as f:
                     info = json.load(f) or {}
@@ -393,10 +392,6 @@ class TranscodeWorker:
         elapsed = time.time() - t0
         success = len(failed) == 0
         final_status = STATUS_DONE if success else STATUS_FAILED
-        # Record per-camera applied rotations so downstream convert
-        # passes know whether to re-rotate (cf. base_converter +
-        # video_sync). Only cameras with success are listed.
-        applied = {cam: int(rotations.get(cam, 0)) for cam in done}
         _patch_status(
             info_path,
             final_status,
@@ -405,7 +400,6 @@ class TranscodeWorker:
             cameras_done=done,
             cameras_failed=failed,
             cameras_skipped=skipped,
-            rotations_applied=applied,
         )
         return TranscodeResult(
             episode_dir=episode_dir, success=success, elapsed_sec=elapsed,
@@ -613,6 +607,25 @@ def _mp4_frame_count(mp4: Path) -> int:
         ) from exc
 
 
+def _read_camera_metadata_rotations(episode_dir: Path) -> Dict[str, int]:
+    metadata_path = episode_dir / "camera_info" / "camera_metadata.yaml"
+    if not metadata_path.exists():
+        return {}
+    try:
+        data = yaml.safe_load(metadata_path.read_text(encoding="utf-8")) or {}
+        cameras = data.get("cameras") or {}
+        if not isinstance(cameras, dict):
+            return {}
+        rotations: Dict[str, int] = {}
+        for name, entry in cameras.items():
+            if not isinstance(entry, dict):
+                continue
+            rotations[str(name)] = int(entry.get("rotation_deg", 0) or 0)
+        return rotations
+    except Exception:
+        return {}
+
+
 def _patch_status(
     info_path: Path,
     status: str,
@@ -622,7 +635,6 @@ def _patch_status(
     cameras_done: Optional[list[str]] = None,
     cameras_failed: Optional[dict[str, str]] = None,
     cameras_skipped: Optional[dict[str, str]] = None,
-    rotations_applied: Optional[dict[str, int]] = None,
 ) -> None:
     """Read-modify-write episode_info.json atomically.
 
@@ -648,12 +660,6 @@ def _patch_status(
         info["transcoding_cameras_failed"] = dict(cameras_failed)
     if cameras_skipped is not None:
         info["transcoding_cameras_skipped"] = dict(cameras_skipped)
-    if rotations_applied is not None:
-        # Merge with any existing applied rotations so a partial re-run
-        # doesn't lose history for cameras that already finished.
-        prev = info.get("camera_rotations_applied") or {}
-        prev.update({k: int(v) for k, v in rotations_applied.items()})
-        info["camera_rotations_applied"] = prev
     info["transcoding_updated"] = time.strftime(
         "%Y-%m-%dT%H:%M:%SZ", time.gmtime()
     )

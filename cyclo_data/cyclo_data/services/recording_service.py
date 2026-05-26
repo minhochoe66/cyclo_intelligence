@@ -483,14 +483,6 @@ class RecordingService:
             response.success = False
             response.message = 'rosbag_recorder service unavailable'
             return response
-        if (
-            request.command == RecordingCommand.Request.START_SEGMENT
-            and not list(request.task_info.subtask_instruction or [])
-        ):
-            response.success = False
-            response.message = 'START_SEGMENT requires subtask_instruction[]'
-            return response
-
         dm = self._ensure_data_manager(request.task_info, request.robot_type)
         if request.command == RecordingCommand.Request.START_SEGMENT:
             dm.set_current_subtask_index(int(request.segment_index))
@@ -680,30 +672,32 @@ class RecordingService:
                 video_stats=self._last_video_stats,
                 camera_info_files=self._last_camera_info_files,
                 camera_rotations=self._last_camera_rotations,
+                image_topics=self._last_image_topics,
+                camera_info_topics=self._last_camera_info_topics,
             )
 
-        is_subtask_mode = bool(
-            getattr(self._data_manager, '_subtask_mode', False)
+        is_segmented_storage = bool(
+            getattr(self._data_manager, '_segmented_storage_mode', False)
         )
         finishes_full_episode = command_name not in (
             'MOVE_TO_NEXT', 'STOP_SEGMENT',
         )
 
         # Fire the H.264 transcode in the background for normal episodes.
-        # Subtask recordings are archived into their full-episode folder
-        # on FINISH, so per-segment video transcodes would race with that
-        # archival cleanup.
-        if (not is_subtask_mode
+        # Segmented recordings are archived into their full-episode folder
+        # on FINISH_EPISODE/FINISH, so per-segment video transcodes would
+        # race with that archival cleanup.
+        if (not is_segmented_storage
                 and episode_dir.exists()
                 and (episode_dir / 'videos').exists()):
             self._submit_transcode(episode_dir)
 
         self._data_manager.stop_recording(
             finish_full_episode=(
-                finishes_full_episode and not is_subtask_mode
+                finishes_full_episode and not is_segmented_storage
             )
         )
-        if is_subtask_mode and finishes_full_episode:
+        if is_segmented_storage and finishes_full_episode:
             self._data_manager.finish_full_episode()
         self._rosbag.publish_action_event(event)
 
@@ -801,6 +795,8 @@ class RecordingService:
                 video_stats=self._last_video_stats,
                 camera_info_files=self._last_camera_info_files,
                 camera_rotations=self._last_camera_rotations,
+                image_topics=self._last_image_topics,
+                camera_info_topics=self._last_camera_info_topics,
             )
 
         self._data_manager.stop_recording()
