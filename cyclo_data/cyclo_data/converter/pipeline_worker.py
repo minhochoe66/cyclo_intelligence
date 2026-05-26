@@ -93,6 +93,7 @@ def _copy_dataset_readme(src_dir: Path, dst_dir: Path, logger: logging.Logger) -
 def _convert_single_episode_worker(
     episode_dir, output_dir, fps, use_hw, enable_smoothing,
     selected_cameras=None, camera_rotations=None, image_resize=None,
+    camera_pairs=None,
 ):
     """Top-level function for ProcessPoolExecutor (must be picklable).
 
@@ -144,6 +145,7 @@ def _convert_single_episode_worker(
     converter = RosbagToMp4Converter(
         fps=fps,
         use_hardware_encoding=use_hw,
+        camera_pairs=dict(camera_pairs or {}),
         enable_timestamp_smoothing=enable_smoothing,
         selected_cameras=list(selected_cameras or []),
         camera_rotations=dict(camera_rotations or {}),
@@ -521,6 +523,8 @@ class Mp4ConversionWorker:
                         logger.info(f'=== Stage 1/{n_stages}: Converting to MP4 ===')
                         success, message = Mp4ConversionWorker._convert_dataset(
                             dataset_path=dataset_path,
+                            robot_type=robot_type,
+                            robot_config_path=robot_config_path,
                             progress_queue=progress_queue,
                             logger=logger,
                             fps=fps,
@@ -771,6 +775,8 @@ class Mp4ConversionWorker:
     @staticmethod
     def _convert_dataset(
         dataset_path: str,
+        robot_type: str,
+        robot_config_path: str,
         progress_queue: multiprocessing.Queue,
         logger: logging.Logger,
         fps: int = 15,
@@ -809,6 +815,11 @@ class Mp4ConversionWorker:
 
             converted_count = 0
             failed_episodes = []
+            camera_pairs = Mp4ConversionWorker._camera_pairs_from_robot_config(
+                robot_type=robot_type,
+                robot_config_path=robot_config_path,
+                logger=logger,
+            )
 
             # Parallel episode conversion using ProcessPoolExecutor
             # Each worker creates its own RosbagToMp4Converter (stateless, picklable args)
@@ -850,6 +861,7 @@ class Mp4ConversionWorker:
                         selected_cameras or [],
                         camera_rotations or {},
                         image_resize,
+                        camera_pairs,
                     )
                     futures[future] = episode_id
 
@@ -1042,6 +1054,35 @@ class Mp4ConversionWorker:
             return f'{raw_idx}_converted'
         except (TypeError, ValueError):
             return f'{episode_dir.name}_converted'
+
+    @staticmethod
+    def _camera_pairs_from_robot_config(
+        robot_type: str,
+        robot_config_path: str,
+        logger: logging.Logger,
+    ) -> Dict[str, tuple[str, str]]:
+        """Build ``{camera_name: (image_topic, camera_info_topic)}`` from config."""
+        if not robot_type and not robot_config_path:
+            logger.warning(
+                'No robot_type/robot_config_path supplied; images-in-MCAP '
+                'MP4 fallback will not have camera pairs.'
+            )
+            return {}
+        try:
+            from cyclo_data.converter.rosbag2mp4 import RosbagToMp4Converter
+
+            pairs = RosbagToMp4Converter.camera_pairs_from_robot_config(
+                robot_type,
+                robot_config_path or None,
+            )
+            logger.info(
+                f'Loaded {len(pairs)} camera pair(s) from robot_config: '
+                f'{list(pairs.keys())}'
+            )
+            return pairs
+        except Exception as exc:  # noqa: BLE001
+            logger.warning(f'Failed to build camera pairs from robot_config: {exc!r}')
+            return {}
 
     @staticmethod
     def _collect_converted_bag_paths(dataset_path: Path) -> List[Path]:

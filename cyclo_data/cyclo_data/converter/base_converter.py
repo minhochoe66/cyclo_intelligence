@@ -734,9 +734,9 @@ class RosbagToLerobotConverterBase:
         bag_path: Path,
         episode_info: Dict[str, Any],
     ) -> bool:
-        """Return True for full episodes archived from multiple subtasks."""
+        """Return True for full episodes with archived segment MCAP files."""
         segments = episode_info.get("segments")
-        if not isinstance(segments, list) or len(segments) <= 1:
+        if not isinstance(segments, list) or len(segments) < 1:
             return False
         mcap_paths = self._segment_mcap_paths(Path(bag_path), len(segments))
         return len(mcap_paths) == len(segments)
@@ -954,7 +954,7 @@ class RosbagToLerobotConverterBase:
         self,
         episode: EpisodeData,
     ) -> List[Dict[str, Any]]:
-        """Build time-based subtask annotations for one episode."""
+        """Build frame-index based subtask annotations for one episode."""
         if not episode.subtask_segments and not episode.subtask_indices:
             return []
 
@@ -975,7 +975,7 @@ class RosbagToLerobotConverterBase:
                         current_idx,
                         f"Subtask {current_idx + 1}",
                     ),
-                    "frame_duration": [start_frame / fps, frame_idx / fps],
+                    "frame_duration": [int(start_frame), int(frame_idx)],
                 })
                 start_frame = frame_idx
                 current_idx = idx
@@ -985,7 +985,7 @@ class RosbagToLerobotConverterBase:
                     current_idx,
                     f"Subtask {current_idx + 1}",
                 ),
-                "frame_duration": [start_frame / fps, episode.length / fps],
+                "frame_duration": [int(start_frame), int(episode.length)],
             })
             return annotations
 
@@ -993,8 +993,8 @@ class RosbagToLerobotConverterBase:
             try:
                 idx = int(segment.get("subtask_index", 0))
                 start, end = segment.get("frame_duration", [0.0, 0.0])
-                start_f = float(start)
-                end_f = float(end)
+                start_f = max(0, min(episode.length, int(round(float(start) * fps))))
+                end_f = max(start_f, min(episode.length, int(round(float(end) * fps))))
             except (TypeError, ValueError):
                 continue
             annotations.append({
@@ -1006,6 +1006,15 @@ class RosbagToLerobotConverterBase:
                 "frame_duration": [start_f, end_f],
             })
         return annotations
+
+    def _annotation_chunk_dir_name(self, chunk_idx: int) -> str:
+        return f"chunk-{chunk_idx:03d}"
+
+    def _annotation_episode_filename(self, episode_idx: int) -> str:
+        return f"episode_{episode_idx:06d}.json"
+
+    def _episode_chunk_index(self, episode_idx: int) -> int:
+        return episode_idx // int(self.config.chunks_size or DEFAULT_CHUNK_SIZE)
 
     def _write_subtasks_parquet(
         self,
@@ -1044,12 +1053,12 @@ class RosbagToLerobotConverterBase:
             if not annotations:
                 continue
             ep_idx = episode.episode_index
-            chunk_idx = ep_idx // self.config.chunks_size
+            chunk_idx = self._episode_chunk_index(ep_idx)
             path = (
                 output_dir
                 / "annotations"
-                / f"chunk-{chunk_idx:03d}"
-                / f"episode_{ep_idx:06d}.json"
+                / self._annotation_chunk_dir_name(chunk_idx)
+                / self._annotation_episode_filename(ep_idx)
             )
             path.parent.mkdir(parents=True, exist_ok=True)
             task = episode.tasks[0] if episode.tasks else "default_task"
@@ -1057,11 +1066,8 @@ class RosbagToLerobotConverterBase:
                 "task_name": episode.task_name or task,
                 "data_folder": "",
                 "meta_data": {
-                    "task_duration": episode.length / float(self.config.fps or DEFAULT_FPS),
-                    "valid_duration": [
-                        0.0,
-                        episode.length / float(self.config.fps or DEFAULT_FPS),
-                    ],
+                    "task_duration": int(episode.length),
+                    "valid_duration": [0, int(episode.length)],
                 },
                 "sub_task_annotation": annotations,
             }
@@ -1115,6 +1121,8 @@ class RosbagToLerobotConverterBase:
     ) -> List[EpisodeData]:
         """Collapse complete recorded subtask groups into long-horizon episodes."""
         if not any(ep.recording_mode == "subtask" for ep in episodes_data):
+            if not self._validate_consistent_subtask_counts(episodes_data):
+                return []
             return episodes_data
 
         grouped: Dict[int, List[EpisodeData]] = {}
@@ -1144,9 +1152,29 @@ class RosbagToLerobotConverterBase:
             if stitched is not None:
                 prepared.append(stitched)
 
+        if not self._validate_consistent_subtask_counts(prepared):
+            return []
+
         for new_idx, ep in enumerate(prepared):
             ep.episode_index = new_idx
         return prepared
+
+    def _validate_consistent_subtask_counts(
+        self,
+        episodes_data: List[EpisodeData],
+    ) -> bool:
+        """Reject datasets that mix single-task and subtask episode schemas."""
+        counts = {
+            len(ep.subtask_segments or [])
+            for ep in episodes_data
+        }
+        if len(counts) <= 1:
+            return True
+        self._log_error(
+            "Mixed Number of Subtasks in one dataset is not supported: "
+            f"found counts={sorted(counts)}. Use separate task folders."
+        )
+        return False
 
     def _stitch_subtask_group(
         self,
@@ -2750,7 +2778,7 @@ class RosbagToLerobotConverterBase:
     def _get_camera_name_for_video(self, filename: str) -> str:
         """Get camera name from video filename.
 
-        MP4 converter outputs files like 'cam_head_left.mp4',
+        MP4 converter outputs files like 'cam_left_head.mp4',
         so the stem is already the camera name.
         """
         name = filename.replace("_compressed", "")
@@ -2766,7 +2794,7 @@ class RosbagToLerobotConverterBase:
                 if sanitized_topic in name or name in sanitized_topic:
                     return camera_name
 
-        # Filename is already the camera name (e.g., cam_head_left)
+        # Filename is already the camera name (e.g., cam_left_head)
         if name.startswith("cam_"):
             return name
 
@@ -2864,6 +2892,9 @@ class RosbagToLerobotConverterBase:
             self._log_warning(f'ffprobe failed for {video_path}: {e}')
         return info
 
+    def _video_feature_key(self, camera_name: str) -> str:
+        return f"observation.images.{camera_name}"
+
     def _build_features(self, episodes_data: List[EpisodeData]):
         """Build feature definitions from episode data."""
         # Get dimensions from first episode
@@ -2936,7 +2967,7 @@ class RosbagToLerobotConverterBase:
         # pix_fmt / fps / dimensions / has_audio for downstream loaders.
         for ep in episodes_data:
             for camera_name, video_path in ep.video_files.items():
-                feature_key = f"observation.images.{camera_name}"
+                feature_key = self._video_feature_key(camera_name)
                 if feature_key not in self._features:
                     info = self._get_video_info(video_path)
                     self._features[feature_key] = {
@@ -2977,13 +3008,6 @@ class RosbagToLerobotConverterBase:
         knowing what knob was set when the dataset was produced.
         """
         output_dir = Path(self.config.output_dir)
-        # task_name = output_dir.name with "_lerobot_v21" / "_v30" suffix removed.
-        suffix = '_lerobot_v21'
-        if not output_dir.name.endswith(suffix):
-            suffix = '_lerobot_v30' if output_dir.name.endswith('_lerobot_v30') else ''
-        task_name = (
-            output_dir.name[: -len(suffix)] if suffix else output_dir.name
-        )
         # Audit snapshot — fill empty selection fields from the discovered
         # robot_config defaults so the recorded config reflects what was
         # actually used in the conversion (not just what the caller
@@ -2991,39 +3015,52 @@ class RosbagToLerobotConverterBase:
         cameras = list(self.config.selected_cameras) or list(
             self._camera_mapping.values()
         )
-        state_topics = (
-            list(self.config.selected_state_topics) or list(self.config.state_topics)
+        state_topics = self._audit_topic_selection(
+            list(self.config.selected_state_topics),
+            list(self.config.state_topics),
+            self._state_topic_key_map,
+            strip_prefix='follower_',
         )
-        action_topics = (
-            list(self.config.selected_action_topics) or list(self.config.action_topics)
+        action_topics = self._audit_topic_selection(
+            list(self.config.selected_action_topics),
+            list(self.config.action_topics),
+            self._action_topic_key_map,
+            strip_prefix='leader_',
         )
-        # selected_joints should reflect the joint names that ended up in
-        # observation.state — i.e. just the state side (follower_*),
-        # matching the reference layout. _joint_order is the flat
-        # follower+leader concatenation (typically 2x the state dim).
-        joints = list(self.config.selected_joints) or self._joint_names_from_config(
-            'follower_'
-        )
+        task_name = self._root_task_name()
         # Camera rotations — include every known camera with an explicit
         # 0 for unrotated, mirroring the reference dataset's snapshot.
-        rotations: Dict[str, int] = {cam: 0 for cam in cameras}
+        # Robot-config rotations are the source of truth because rotation
+        # is applied at raw recording time. Explicit conversion rotations
+        # are retained as an override for legacy/manual conversions that
+        # do not have robot-config provenance available.
+        rotation_source = dict(getattr(self, '_camera_rotations', {}) or {})
         for cam, deg in self.config.camera_rotations.items():
-            rotations[cam] = int(deg)
+            deg = int(deg)
+            if cam not in rotation_source or deg:
+                rotation_source[cam] = deg
+        rotations: Dict[str, int] = {}
+        for cam in cameras:
+            deg = int(rotation_source.get(cam, 0) or 0)
+            if deg:
+                rotations[cam] = deg
         snapshot = {
             'source_rosbags': list(self.config.source_rosbags),
             'conversion_config': {
                 'robot_type': self.config.robot_type,
-                'fps': int(self.config.fps),
                 'task_name': task_name,
-                'selected_cameras': cameras,
+                'fps': int(self.config.fps),
                 'camera_rotations': rotations,
+                'selected_end_effector_topics': [],
+                'selected_cameras': cameras,
+                'output_dataset_name': output_dir.name,
                 'image_resize': (
                     list(self.config.image_resize)
                     if self.config.image_resize else None
                 ),
                 'selected_joint_state_topics': state_topics,
+                'primitive_instructions': [],
                 'selected_action_topics': action_topics,
-                'selected_joints': joints,
             },
         }
         info_path = output_dir / 'info.json'
@@ -3033,6 +3070,39 @@ class RosbagToLerobotConverterBase:
             self._log_info(f'Wrote root info.json: {info_path}')
         except Exception as exc:  # noqa: BLE001
             self._log_warning(f'Failed to write root info.json: {exc}')
+
+    def _root_task_name(self) -> str:
+        """Return the main task instruction for root conversion_config."""
+        tasks = [
+            str(task or '').strip()
+            for _, task in sorted(getattr(self, '_tasks', {}).items())
+            if str(task or '').strip()
+        ]
+        if len(tasks) == 1:
+            return tasks[0]
+        return ''
+
+    @staticmethod
+    def _audit_topic_selection(
+        selected: List[str],
+        defaults: List[str],
+        topic_key_map: Dict[str, str],
+        *,
+        strip_prefix: str = '',
+    ) -> List[str]:
+        """Return robot-config logical names for root info.json audit fields."""
+        values = selected or defaults
+        known_keys = set(topic_key_map.values())
+        result: List[str] = []
+        for value in values:
+            key = topic_key_map.get(value, value)
+            if key not in known_keys and value in known_keys:
+                key = value
+            if strip_prefix and key.startswith(strip_prefix):
+                key = key[len(strip_prefix):]
+            if key not in result:
+                result.append(key)
+        return result
 
     def _compute_episode_stats(
         self, episode: EpisodeData, global_start_index: int = 0,
@@ -3062,7 +3132,7 @@ class RosbagToLerobotConverterBase:
             }
 
         for camera_name, video_path in episode.video_files.items():
-            feature_key = f"observation.images.{camera_name}"
+            feature_key = self._video_feature_key(camera_name)
             video_stats = self._compute_video_stats(video_path, camera_name)
             if video_stats:
                 stats[feature_key] = video_stats

@@ -27,17 +27,17 @@ writers (per-episode parquet + JSONL meta).
 LeRobot v2.1 Dataset Structure:
     dataset_name/
     ├── data/
-    │   └── chunk-{chunk:03d}/
-    │       └── episode_{episode:06d}.parquet
+    │   └── task-{chunk:04d}/
+    │       └── episode_{episode:08d}.parquet
     ├── meta/
     │   ├── info.json
     │   ├── episodes.jsonl
     │   ├── episodes_stats.jsonl
     │   └── tasks.jsonl
     └── videos/
-        └── chunk-{chunk:03d}/
-            └── observation.images.{camera}/
-                └── episode_{episode:06d}.mp4
+        └── task-{chunk:04d}/
+            └── observation.images.rgb.{camera}/
+                └── episode_{episode:08d}.mp4
 """
 
 import json
@@ -65,6 +65,7 @@ from .base_converter import (  # noqa: F401
 
 
 CODEBASE_VERSION = "v2.1"
+V21_CHUNK_SIZE = 10000
 
 
 class RosbagToLerobotConverter(RosbagToLerobotConverterBase):
@@ -249,17 +250,17 @@ class RosbagToLerobotConverter(RosbagToLerobotConverterBase):
         """Write a single episode's data files."""
         output_dir = Path(self.config.output_dir)
         ep_idx = episode.episode_index
-        chunk_idx = ep_idx // self.config.chunks_size
+        chunk_idx = ep_idx // V21_CHUNK_SIZE
 
         # Create chunk directories
-        data_chunk_dir = output_dir / "data" / f"chunk-{chunk_idx:03d}"
+        data_chunk_dir = output_dir / "data" / f"task-{chunk_idx:04d}"
         data_chunk_dir.mkdir(parents=True, exist_ok=True)
 
-        video_chunk_dir = output_dir / "videos" / f"chunk-{chunk_idx:03d}"
+        video_chunk_dir = output_dir / "videos" / f"task-{chunk_idx:04d}"
         video_chunk_dir.mkdir(parents=True, exist_ok=True)
 
         # Write parquet file
-        parquet_path = data_chunk_dir / f"episode_{ep_idx:06d}.parquet"
+        parquet_path = data_chunk_dir / f"episode_{ep_idx:08d}.parquet"
         self._write_parquet(episode, parquet_path)
 
         # Copy video files. ``_sync_videos_to_grid`` produces
@@ -278,9 +279,9 @@ class RosbagToLerobotConverter(RosbagToLerobotConverterBase):
         # resolutions). Operators who want a clean tree can wipe
         # ``<episode>/videos/*_synced.*`` after the dataset is final.
         for camera_name, src_video in episode.video_files.items():
-            video_dir = video_chunk_dir / f"observation.images.{camera_name}"
+            video_dir = video_chunk_dir / self._video_feature_key(camera_name)
             video_dir.mkdir(parents=True, exist_ok=True)
-            dst_video = video_dir / f"episode_{ep_idx:06d}.mp4"
+            dst_video = video_dir / f"episode_{ep_idx:08d}.mp4"
             shutil.copy2(src_video, dst_video)
             self._log_info(f"Copied video: {src_video.name} -> {dst_video}")
 
@@ -326,37 +327,30 @@ class RosbagToLerobotConverter(RosbagToLerobotConverterBase):
 
         # Build schema with fixed_size_list for HuggingFace compatibility
         schema_fields = [
-            pa.field("timestamp", pa.float32()),
-            pa.field("frame_index", pa.int64()),
-            pa.field("episode_index", pa.int64()),
             pa.field("index", pa.int64()),
+            pa.field("episode_index", pa.int64()),
             pa.field("task_index", pa.int64()),
+            pa.field("timestamp", pa.float64()),
         ]
-        has_subtask_feature = "subtask_index" in self._features
-        if has_subtask_feature:
-            schema_fields.append(pa.field("subtask_index", pa.int64()))
-
+        if action_dim > 0:
+            schema_fields.append(pa.field("action", pa.list_(pa.float32(), action_dim)))
         if state_dim > 0:
             schema_fields.append(
                 pa.field("observation.state", pa.list_(pa.float32(), state_dim))
             )
-        if action_dim > 0:
-            schema_fields.append(pa.field("action", pa.list_(pa.float32(), action_dim)))
+        has_subtask_feature = "subtask_index" in self._features
+        if has_subtask_feature:
+            schema_fields.append(pa.field("subtask_index", pa.int64()))
 
         schema = pa.schema(schema_fields)
 
         # Build data arrays with explicit types
         arrays = [
             pa.array(
-                [float(episode.timestamps[i]) for i in range(num_frames)],
-                type=pa.float32(),
-            ),
-            pa.array(list(range(num_frames)), type=pa.int64()),
-            pa.array([episode.episode_index] * num_frames, type=pa.int64()),
-            pa.array(
                 list(range(self._total_frames, self._total_frames + num_frames)),
                 type=pa.int64(),
             ),
+            pa.array([episode.episode_index] * num_frames, type=pa.int64()),
         ]
 
         # Task index
@@ -364,12 +358,19 @@ class RosbagToLerobotConverter(RosbagToLerobotConverterBase):
         task_idx = self._task_to_index.get(default_task, 0)
         arrays.append(pa.array([task_idx] * num_frames, type=pa.int64()))
 
-        if has_subtask_feature:
-            if len(episode.subtask_indices) == num_frames:
-                subtask_values = [int(idx) for idx in episode.subtask_indices]
-            else:
-                subtask_values = [0] * num_frames
-            arrays.append(pa.array(subtask_values, type=pa.int64()))
+        arrays.append(
+            pa.array(
+                [float(episode.timestamps[i]) for i in range(num_frames)],
+                type=pa.float64(),
+            )
+        )
+
+        # Add action as fixed_size_list
+        if episode.action:
+            action_values = [[float(v) for v in action] for action in episode.action]
+            arrays.append(
+                pa.array(action_values, type=pa.list_(pa.float32(), action_dim))
+            )
 
         # Add observation.state as fixed_size_list
         if episode.observation_state:
@@ -380,36 +381,35 @@ class RosbagToLerobotConverter(RosbagToLerobotConverterBase):
                 pa.array(state_values, type=pa.list_(pa.float32(), state_dim))
             )
 
-        # Add action as fixed_size_list
-        if episode.action:
-            action_values = [[float(v) for v in action] for action in episode.action]
-            arrays.append(
-                pa.array(action_values, type=pa.list_(pa.float32(), action_dim))
-            )
+        if has_subtask_feature:
+            if len(episode.subtask_indices) == num_frames:
+                subtask_values = [int(idx) for idx in episode.subtask_indices]
+            else:
+                subtask_values = [0] * num_frames
+            arrays.append(pa.array(subtask_values, type=pa.int64()))
 
         # Build HuggingFace metadata
         hf_features = {
-            "timestamp": {"dtype": "float32", "_type": "Value"},
-            "frame_index": {"dtype": "int64", "_type": "Value"},
-            "episode_index": {"dtype": "int64", "_type": "Value"},
             "index": {"dtype": "int64", "_type": "Value"},
+            "episode_index": {"dtype": "int64", "_type": "Value"},
             "task_index": {"dtype": "int64", "_type": "Value"},
+            "timestamp": {"dtype": "float64", "_type": "Value"},
         }
-        if has_subtask_feature:
-            hf_features["subtask_index"] = {"dtype": "int64", "_type": "Value"}
 
-        if state_dim > 0:
-            hf_features["observation.state"] = {
-                "feature": {"dtype": "float32", "_type": "Value"},
-                "length": state_dim,
-                "_type": "Sequence",
-            }
         if action_dim > 0:
             hf_features["action"] = {
                 "feature": {"dtype": "float32", "_type": "Value"},
                 "length": action_dim,
                 "_type": "Sequence",
             }
+        if state_dim > 0:
+            hf_features["observation.state"] = {
+                "feature": {"dtype": "float32", "_type": "Value"},
+                "length": state_dim,
+                "_type": "Sequence",
+            }
+        if has_subtask_feature:
+            hf_features["subtask_index"] = {"dtype": "int64", "_type": "Value"}
 
         hf_metadata = json.dumps({"info": {"features": hf_features}})
 
@@ -423,12 +423,35 @@ class RosbagToLerobotConverter(RosbagToLerobotConverterBase):
         pq.write_table(table, parquet_path)
         self._log_info(f"Wrote parquet: {parquet_path}")
 
+    def _v21_features_for_info(self) -> dict:
+        """Return v2.1 feature metadata, excluding parquet-only leftovers."""
+        ordered = {}
+        for key in ("observation.state", "action"):
+            if key in self._features:
+                ordered[key] = self._features[key]
+        for key in self._features:
+            if key.startswith("observation.images."):
+                ordered[key] = self._features[key]
+        for key in ("timestamp", "episode_index", "index", "task_index", "subtask_index"):
+            if key in self._features:
+                value = dict(self._features[key])
+                if key == "timestamp":
+                    value["dtype"] = "float64"
+                ordered[key] = value
+        return ordered
+
     def _write_info_json(self):
         """Write info.json metadata file."""
         output_dir = Path(self.config.output_dir)
 
+        features = self._v21_features_for_info()
         num_video_keys = sum(
-            1 for k in self._features if k.startswith("observation.images.")
+            1 for k in features if k.startswith("observation.images.")
+        )
+        total_chunks = (
+            (self._total_episodes + V21_CHUNK_SIZE - 1) // V21_CHUNK_SIZE
+            if self._total_episodes > 0
+            else 0
         )
 
         info = {
@@ -438,20 +461,20 @@ class RosbagToLerobotConverter(RosbagToLerobotConverterBase):
             "total_frames": self._total_frames,
             "total_tasks": len(self._tasks),
             "total_videos": self._total_episodes * num_video_keys,
-            "total_chunks": (self._total_episodes // self.config.chunks_size) + 1,
-            "chunks_size": self.config.chunks_size,
+            "total_chunks": total_chunks,
+            "chunks_size": V21_CHUNK_SIZE,
             "fps": self.config.fps,
             "splits": {"train": f"0:{self._total_episodes}"},
-            "data_path": "data/chunk-{episode_chunk:03d}/episode_{episode_index:06d}.parquet",
-            "video_path": "videos/chunk-{episode_chunk:03d}/{video_key}/episode_{episode_index:06d}.mp4"
+            "data_path": "data/task-{episode_chunk:04d}/episode_{episode_index:08d}.parquet",
+            "video_path": "videos/task-{episode_chunk:04d}/{video_key}/episode_{episode_index:08d}.mp4"
             if self.config.use_videos
             else None,
-            "features": self._features,
+            "features": features,
         }
-        if "subtask_index" in self._features:
+        if "subtask_index" in features:
             info["annotation_path"] = (
-                "annotations/chunk-{episode_chunk:03d}/"
-                "episode_{episode_index:06d}.json"
+                "annotations/task-{episode_chunk:04d}/"
+                "episode_{episode_index:08d}.json"
             )
 
         info_path = output_dir / "meta" / "info.json"
@@ -459,6 +482,18 @@ class RosbagToLerobotConverter(RosbagToLerobotConverterBase):
             json.dump(info, f, indent=4, ensure_ascii=False)
 
         self._log_info(f"Wrote info.json: {info_path}")
+
+    def _annotation_chunk_dir_name(self, chunk_idx: int) -> str:
+        return f"task-{chunk_idx:04d}"
+
+    def _annotation_episode_filename(self, episode_idx: int) -> str:
+        return f"episode_{episode_idx:08d}.json"
+
+    def _episode_chunk_index(self, episode_idx: int) -> int:
+        return episode_idx // V21_CHUNK_SIZE
+
+    def _video_feature_key(self, camera_name: str) -> str:
+        return f"observation.images.rgb.{camera_name}"
 
     def _write_tasks_jsonl(self):
         """Write tasks.jsonl metadata file."""

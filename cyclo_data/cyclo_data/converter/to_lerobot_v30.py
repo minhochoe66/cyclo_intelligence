@@ -194,6 +194,9 @@ class RosbagToLerobotV30Converter(RosbagToLerobotConverterBase):
             str, List[Tuple[Path, float]]
         ] = {}  # camera -> [(path, duration)]
 
+    def _video_feature_key(self, camera_name: str) -> str:
+        return f"observation.images.rgb.{camera_name}"
+
     def convert_multiple_rosbags(self, bag_paths: List[Path]) -> bool:
         """
         Convert multiple ROSbag recordings to a single LeRobot v3.0 dataset.
@@ -594,7 +597,7 @@ class RosbagToLerobotV30Converter(RosbagToLerobotConverterBase):
         videos: List[Tuple[int, Path, float]],
     ):
         """Concatenate and write videos for a single camera."""
-        camera_key = f"observation.images.{camera_name}"
+        camera_key = self._video_feature_key(camera_name)
 
         chunk_idx = 0
         file_idx = 0
