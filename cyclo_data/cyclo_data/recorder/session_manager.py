@@ -23,7 +23,6 @@ import queue
 import shutil
 import socket
 import subprocess
-import tempfile
 import threading
 import time
 from typing import Optional
@@ -987,6 +986,8 @@ class DataManager:
         rotation_deg: int = 0,
         needs_pad: bool = False,
     ) -> None:
+        from cyclo_data.converter.video_sync import _ffmpeg
+
         dst.parent.mkdir(parents=True, exist_ok=True)
         tmp = dst.with_suffix(dst.suffix + '.tmp')
         filters = []
@@ -996,7 +997,7 @@ class DataManager:
         if needs_pad:
             filters.append('pad=ceil(iw/2)*2:ceil(ih/2)*2')
         cmd = [
-            'ffmpeg', '-hide_banner', '-loglevel', 'warning', '-y',
+            _ffmpeg(), '-hide_banner', '-loglevel', 'warning', '-y',
             '-i', str(src),
             '-c:v', 'libx264',
             '-preset', 'ultrafast',
@@ -1085,67 +1086,6 @@ class DataManager:
                 warnings[prefix] = segment_warnings
 
         return video_segments, warnings
-
-    @staticmethod
-    def _stitch_episode_videos(
-        subtask_dirs: list[Path],
-        out_dir: Path,
-    ) -> tuple[list[str], dict[str, str]]:
-        camera_sets = []
-        for seg_dir in subtask_dirs:
-            videos = seg_dir / 'videos'
-            cams = {
-                path.stem for path in videos.glob('*.mp4')
-                if not path.stem.endswith('_synced')
-            } if videos.exists() else set()
-            camera_sets.append(cams)
-        if not camera_sets:
-            return [], {}
-        common_cameras = set.intersection(*camera_sets)
-        if not common_cameras:
-            return [], {}
-        dst_videos = out_dir / 'videos'
-        if dst_videos.exists():
-            shutil.rmtree(dst_videos, ignore_errors=True)
-        dst_videos.mkdir(parents=True, exist_ok=True)
-
-        stitched = []
-        failures = {}
-        for camera in sorted(common_cameras):
-            srcs = [seg_dir / 'videos' / f'{camera}.mp4' for seg_dir in subtask_dirs]
-            out_path = dst_videos / f'{camera}.mp4'
-            list_path = None
-            try:
-                with tempfile.NamedTemporaryFile(
-                    'w', encoding='utf-8', suffix='.ffconcat', delete=False
-                ) as list_file:
-                    list_path = Path(list_file.name)
-                    for src in srcs:
-                        escaped = str(src.resolve()).replace("'", "'\\''")
-                        list_file.write(f"file '{escaped}'\n")
-                cmd = [
-                    'ffmpeg', '-y',
-                    '-f', 'concat', '-safe', '0',
-                    '-i', str(list_path),
-                    '-an',
-                    '-c:v', 'libx264',
-                    '-pix_fmt', 'yuv420p',
-                    '-movflags', '+faststart',
-                    str(out_path),
-                ]
-                subprocess.run(
-                    cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-                    text=True, check=True,
-                )
-                stitched.append(camera)
-            except Exception as exc:
-                failures[camera] = repr(exc)
-                print(f'[ROBOTIS] Failed to stitch {camera}: {exc!r}')
-                out_path.unlink(missing_ok=True)
-            finally:
-                if list_path is not None:
-                    list_path.unlink(missing_ok=True)
-        return stitched, failures
 
     def update_task_info(self, task_info):
         """Refresh per-session config from a new task_info.

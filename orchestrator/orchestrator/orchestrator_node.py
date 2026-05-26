@@ -133,6 +133,7 @@ class OrchestratorNode(Node):
 
         self.params = None
         self.robot_section = None
+        self.robot_type = ''
         self.on_recording = False
         self.on_inference = False
 

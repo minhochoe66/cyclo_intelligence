@@ -241,8 +241,10 @@ class RosbagToMp4Converter:
 
         for encoder in encoders_to_try:
             try:
+                from .video_sync import _ffmpeg
+
                 result = subprocess.run(
-                    ['ffmpeg', '-hide_banner', '-encoders'],
+                    [_ffmpeg(), '-hide_banner', '-encoders'],
                     capture_output=True,
                     text=True,
                     timeout=5
@@ -1227,9 +1229,9 @@ class RosbagToMp4Converter:
         camera_name: str = '',
     ) -> bool:
         """Try to encode video with specified encoder."""
-        from .video_sync import _ffmpeg_threads_arg
+        from .video_sync import _ffmpeg, _ffmpeg_threads_arg
         cmd = [
-            'ffmpeg',
+            _ffmpeg(),
             '-y',
             *_ffmpeg_threads_arg(),
             '-f', 'rawvideo',

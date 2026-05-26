@@ -2566,8 +2566,10 @@ class RosbagToLerobotConverterBase:
         tmp_path = video_path.with_name(video_path.stem + ".trim_tmp.mp4")
         try:
             import subprocess
+            from cyclo_data.converter.video_sync import _ffmpeg
+
             cmd = [
-                "ffmpeg", "-hide_banner", "-loglevel", "warning", "-y",
+                _ffmpeg(), "-hide_banner", "-loglevel", "warning", "-y",
                 "-i", str(video_path),
                 "-frames:v", str(n),
                 "-c", "copy",
@@ -2677,6 +2679,9 @@ class RosbagToLerobotConverterBase:
             )
             return {}
 
+        from cyclo_data.converter.video_sync import _ffmpeg
+
+        ffmpeg_bin = _ffmpeg()
         out_root = (
             Path(self.config.output_dir)
             / "_subtask_video_concat"
@@ -2723,7 +2728,7 @@ class RosbagToLerobotConverterBase:
                         escaped = str(src.resolve()).replace("'", "'\\''")
                         list_file.write(f"file '{escaped}'\n")
                 cmd = [
-                    "ffmpeg", "-hide_banner", "-loglevel", "warning", "-y",
+                    ffmpeg_bin, "-hide_banner", "-loglevel", "warning", "-y",
                     "-f", "concat", "-safe", "0",
                     "-i", str(list_path),
                     "-an",
