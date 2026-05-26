@@ -30,6 +30,7 @@ Moved to runtime/ as part of D10-groot (mirrors lerobot/runtime/ layout).
 import logging
 import os
 import sys
+import tempfile
 import time
 from typing import Optional
 
@@ -49,6 +50,13 @@ import gr00t.model  # noqa: F401 - register custom models
 from gr00t.data.embodiment_tags import EmbodimentTag  # noqa: E402
 from gr00t.policy.gr00t_policy import Gr00tPolicy  # noqa: E402
 from robot_client import RobotClient  # noqa: E402
+
+
+def _env_flag(name: str, default: bool = False) -> bool:
+    value = os.environ.get(name)
+    if value is None:
+        return default
+    return value.strip().lower() in {"1", "true", "yes", "on"}
 
 # Add GR00T root to sys.path for deployment script imports.
 # After the move into runtime/, parents[0]=runtime, parents[1]=groot,
@@ -89,10 +97,13 @@ def build_trt_engine(policy: Gr00tPolicy, observation: dict, engine_path: str):
     then builds the TRT engine via build_tensorrt_engine.build_engine().
     Takes ~3-5 min on Orin.
     """
-    from scripts.deployment.build_tensorrt_engine import build_engine
+    from scripts.deployment.build_tensorrt_engine import (
+        build_engine,
+        derive_shapes_with_hint,
+    )
 
     logger = logging.getLogger("groot_inference")
-    onnx_path = engine_path.replace(".trt", ".onnx")
+    engine_dir = os.path.dirname(engine_path)
 
     # Step 1: Capture DiT input shapes via hook
     logger.info("Capturing DiT input shapes...")
@@ -107,75 +118,66 @@ def build_trt_engine(policy: Gr00tPolicy, observation: dict, engine_path: str):
     if not capture.captured:
         raise RuntimeError("Failed to capture DiT inputs")
 
-    # Step 2: Export DiT to ONNX
-    # Patch torch.onnx.export to force dynamo=False (avoids torch.export failures
-    # with DiT's dynamic shapes, without modifying the upstream GR00T code)
-    _orig_export = torch.onnx.export
-    def _patched_export(*args, **kwargs):
-        kwargs.setdefault("dynamo", False)
-        return _orig_export(*args, **kwargs)
-    torch.onnx.export = _patched_export
-    try:
-        export_dit_to_onnx(
-            policy=policy,
-            captured_inputs=capture,
-            output_path=onnx_path,
-            use_bf16=True,
+    # Step 2/3: Export DiT to ONNX in an isolated temporary directory, then
+    # build the TensorRT engine into the checkpoint directory. GR00T's ONNX
+    # exporter consolidates external-data files by deleting every non
+    # .onnx/.json/.data file next to the ONNX path. Keeping ONNX artifacts out
+    # of the checkpoint directory prevents model-*.safetensors from being
+    # mistaken for temporary external data.
+    with tempfile.TemporaryDirectory(prefix=".trt_export_", dir=engine_dir) as export_dir:
+        onnx_path = os.path.join(export_dir, "dit_model_bf16.onnx")
+
+        # Patch torch.onnx.export to force dynamo=False (avoids torch.export
+        # failures with DiT's dynamic shapes, without modifying upstream GR00T).
+        _orig_export = torch.onnx.export
+        def _patched_export(*args, **kwargs):
+            kwargs.setdefault("dynamo", False)
+            return _orig_export(*args, **kwargs)
+        torch.onnx.export = _patched_export
+        try:
+            export_dit_to_onnx(
+                policy=policy,
+                captured_inputs=capture,
+                output_path=onnx_path,
+                use_bf16=True,
+            )
+        finally:
+            torch.onnx.export = _orig_export
+
+        logger.info("ONNX exported: %s", onnx_path)
+
+        # N1.7 exports only the visual-language sequence axis as dynamic. The
+        # state/action sequence (sa_embs) is static for a given policy/action
+        # horizon. Derive profiles from ONNX so fixed dims stay fixed and only
+        # named dynamic dims get ranges.
+        vl_seq_len = int(capture.vl_embs.shape[1])
+        min_shapes, opt_shapes, max_shapes = derive_shapes_with_hint(
+            onnx_path,
+            opt_seq_lens={"vl_seq_len": vl_seq_len},
+            max_batch=1,
         )
-    finally:
-        torch.onnx.export = _orig_export
 
-    logger.info("ONNX exported: %s", onnx_path)
+        # Keep the previous generous upper bound for language-conditioned
+        # inputs. derive_shapes_with_hint uses ~2x opt by default, which can be
+        # too tight if the BT sends a longer instruction than export captured.
+        for name in ("vl_embs", "image_mask", "backbone_attention_mask"):
+            shape = max_shapes.get(name)
+            if shape and len(shape) > 1 and shape[1] != opt_shapes[name][1]:
+                widened = list(shape)
+                widened[1] = max(widened[1], 512)
+                max_shapes[name] = tuple(widened)
 
-    # Step 3: Build TensorRT engine
-    min_shapes = {
-        "sa_embs": (1, 1, 1536),
-        "vl_embs": (1, 1, 2048),
-        "timestep": (1,),
-        "image_mask": (1, 1),
-        "backbone_attention_mask": (1, 1),
-    }
-    opt_shapes = {
-        "sa_embs": (1, 51, 1536),
-        "vl_embs": (1, 122, 2048),
-        "timestep": (1,),
-        "image_mask": (1, 122),
-        "backbone_attention_mask": (1, 122),
-    }
-    max_shapes = {
-        "sa_embs": (1, 256, 1536),
-        "vl_embs": (1, 512, 2048),
-        "timestep": (1,),
-        "image_mask": (1, 512),
-        "backbone_attention_mask": (1, 512),
-    }
+        build_engine(
+            onnx_path=onnx_path,
+            engine_path=engine_path,
+            precision="bf16",
+            workspace_mb=8192,
+            min_shapes=min_shapes,
+            opt_shapes=opt_shapes,
+            max_shapes=max_shapes,
+        )
 
-    build_engine(
-        onnx_path=onnx_path,
-        engine_path=engine_path,
-        precision="bf16",
-        workspace_mb=8192,
-        min_shapes=min_shapes,
-        opt_shapes=opt_shapes,
-        max_shapes=max_shapes,
-    )
-
-    # Clean up ONNX and external data files (no longer needed after TRT build)
-    onnx_dir = os.path.dirname(onnx_path)
-    onnx_basename = os.path.splitext(os.path.basename(onnx_path))[0]
-    keep_exts = (".trt", ".json", ".safetensors", ".py", ".txt", ".model", ".md", ".bin")
-    for f in os.listdir(onnx_dir):
-        fpath = os.path.join(onnx_dir, f)
-        if not os.path.isfile(fpath):
-            continue
-        # Remove the ONNX file itself
-        if f.endswith(".onnx"):
-            os.remove(fpath)
-            continue
-        # Remove external data files (created by ONNX export, no standard extension)
-        if not f.endswith(keep_exts):
-            os.remove(fpath)
-    logger.info("Cleaned up ONNX export files from: %s", onnx_dir)
+    logger.info("Cleaned up temporary ONNX export directory")
 
 
 class GR00TInference:
@@ -251,25 +253,32 @@ class GR00TInference:
             self.robot.wait_for_ready(timeout=10.0)
 
             # TensorRT acceleration for DiT (Action Head).
-            # Engine is model-specific (weights baked in) and GPU-specific,
-            # so it lives next to the checkpoint. Auto-build on first use.
-            trt_path = os.path.join(model_path, "dit_model_bf16.trt")
-            try:
-                if not os.path.exists(trt_path):
-                    self.logger.info("No TRT engine found, building automatically...")
-                    dummy_obs = self._build_dummy_observation(request.task_instruction)
-                    if dummy_obs.get("success") is False:
-                        raise RuntimeError(
-                            f"cannot build TRT without a valid observation: "
-                            f"{dummy_obs.get('message')}"
-                        )
-                    build_trt_engine(self.policy, dummy_obs, trt_path)
+            # Keep this opt-in while validating N1.7 model-load/action flow;
+            # ONNX/TRT export writes into the checkpoint directory.
+            if _env_flag("GROOT_TRT_ENABLED", default=False):
+                trt_path = os.path.join(model_path, "dit_model_bf16.trt")
+                try:
+                    if not os.path.exists(trt_path):
+                        self.logger.info("No TRT engine found, building automatically...")
+                        dummy_obs = self._build_dummy_observation(request.task_instruction)
+                        if dummy_obs.get("success") is False:
+                            raise RuntimeError(
+                                f"cannot build TRT without a valid observation: "
+                                f"{dummy_obs.get('message')}"
+                            )
+                        build_trt_engine(self.policy, dummy_obs, trt_path)
 
-                replace_dit_with_tensorrt(self.policy, trt_path)
-                self.logger.info("DiT accelerated with TensorRT: %s", trt_path)
-            except Exception as e:
-                self.logger.warning(
-                    "TensorRT acceleration unavailable, using PyTorch Eager: %s", e
+                    replace_dit_with_tensorrt(self.policy, trt_path)
+                    self.logger.info("DiT accelerated with TensorRT: %s", trt_path)
+                except Exception as e:
+                    self.logger.warning(
+                        "TensorRT acceleration unavailable, using PyTorch Eager: %s", e
+                    )
+            else:
+                self.logger.info(
+                    "TensorRT acceleration disabled (GROOT_TRT_ENABLED=%s); "
+                    "using PyTorch Eager",
+                    os.environ.get("GROOT_TRT_ENABLED", "unset"),
                 )
 
             return {

@@ -310,8 +310,31 @@ class InferenceServer:
             action_keys=self._action_keys,
         )
 
+    def _repair_loaded_state_from_inference(self) -> bool:
+        """Recover from a stale lifecycle flag if the engine is ready.
+
+        Zenoh service calls can arrive close together after a long LOAD. Keep
+        START resilient by trusting the actual inference engine state when it
+        is already initialized, instead of only the cached boolean flag.
+        """
+        if self._loaded:
+            return True
+        if self._inference is None or not self._inference.is_ready:
+            return False
+
+        logger.warning(
+            "loaded flag was false but inference engine is ready; "
+            "repairing lifecycle state"
+        )
+        self._action_keys = list(self._inference.policy_info.get("action", []))
+        if self._trigger_sub is None or self._chunk_pub is None:
+            self._setup_zenoh_io()
+        self._loaded = True
+        self._publish_lifecycle("loaded")
+        return True
+
     def _cmd_start(self):
-        if not self._loaded:
+        if not self._repair_loaded_state_from_inference():
             return self._make_response(success=False, message="LOAD first")
         self._paused = False
         self._running = True
