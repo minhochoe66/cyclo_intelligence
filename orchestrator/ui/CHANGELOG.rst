@@ -6,6 +6,7 @@ Changelog for package cyclo-ui
 ------------------
 * Added single-task episode recording and save support when no subtask count is configured.
 * Preserved numeric task IDs when dispatching recording commands from the UI.
+* Enabled episode discard during active single-task and segmented recording flows.
 * Contributors: kimtaehyeong99
 
 0.1.4 (2026-05-22)
