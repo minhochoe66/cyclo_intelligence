@@ -2,6 +2,10 @@
 Changelog for package cyclo_data
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
+0.1.7 (2026-05-27)
+------------------
+* None
+
 0.1.6 (2026-05-27)
 ------------------
 * Added behavior tree XML save support to the data file server API.

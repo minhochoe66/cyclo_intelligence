@@ -6,7 +6,6 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useSelector, useDispatch } from 'react-redux';
 import clsx from 'clsx';
 import toast from 'react-hot-toast';
-import ROSLIB from 'roslib';
 import {
   MdArrowDropDown,
   MdArrowDropUp,
@@ -28,7 +27,6 @@ import {
   setSlotToServerIdx,
 } from '../features/tasks/taskSlice';
 import { useRosServiceCaller } from '../hooks/useRosServiceCaller';
-import rosConnectionManager from '../utils/rosConnectionManager';
 import InfoPanel from './InfoPanel';
 import Tooltip from './Tooltip';
 
@@ -51,13 +49,11 @@ export default function SegmentPanel() {
   const plannedSubTasks = useSelector((state) => state.tasks.plannedSubTasks);
   const slotToServerIdx = useSelector((state) => state.tasks.slotToServerIdx);
   const activeSlotIndex = useSelector((state) => state.tasks.activeSlotIndex);
-  const rosbridgeUrl = useSelector((state) => state.ros.rosbridgeUrl);
 
   const [optimisticRecording, setOptimisticRecording] = useState(false);
   const [episodeAcquisitionStarted, setEpisodeAcquisitionStarted] = useState(false);
   const [savingInProgress, setSavingInProgress] = useState(false);
-  const footSwitchTopicRef = useRef(null);
-  const footSwitchHandlersRef = useRef({});
+  const lastServerEpisodeRef = useRef(null);
 
   const serverRecording =
     recordStatus.recordPhase === RecordPhase.RECORDING || Boolean(recordStatus.running);
@@ -100,6 +96,68 @@ export default function SegmentPanel() {
       setEpisodeAcquisitionStarted(true);
     }
   }, [hasLocalSavedSubtasks, hasServerSavedSubtasks, serverRecording]);
+
+  useEffect(() => {
+    if (!recordStatus.topicReceived) return;
+
+    const currentEpisode = Number(recordStatus.currentEpisodeNumber || 0);
+    if (lastServerEpisodeRef.current === null) {
+      lastServerEpisodeRef.current = currentEpisode;
+    } else if (
+      isPlanMode &&
+      !serverRecording &&
+      currentEpisode > lastServerEpisodeRef.current
+    ) {
+      lastServerEpisodeRef.current = currentEpisode;
+      setOptimisticRecording(false);
+      setSavingInProgress(false);
+      setEpisodeAcquisitionStarted(false);
+      dispatch(resetSegmentProgress());
+      return;
+    } else {
+      lastServerEpisodeRef.current = currentEpisode;
+    }
+
+    if (!isPlanMode || serverSubtaskCount <= 0 || plannedCountNumber <= 0) {
+      return;
+    }
+
+    const boundedServerSlot = Math.max(
+      0,
+      Math.min(serverSubtaskIndex, plannedCountNumber - 1)
+    );
+    const syncedSlotMap = slotToServerIdx.map((value, index) => (
+      index < boundedServerSlot && value < 0 ? index : value
+    ));
+    const slotMapChanged = syncedSlotMap.some(
+      (value, index) => value !== slotToServerIdx[index]
+    );
+
+    if (slotMapChanged) {
+      dispatch(setSlotToServerIdx(syncedSlotMap));
+    }
+
+    if (activeSlotIndex !== boundedServerSlot && !planComplete) {
+      dispatch(setActiveSlotIndex(boundedServerSlot));
+    }
+
+    if (serverRecording) {
+      setSavingInProgress(false);
+      setEpisodeAcquisitionStarted(true);
+    }
+  }, [
+    activeSlotIndex,
+    dispatch,
+    isPlanMode,
+    planComplete,
+    plannedCountNumber,
+    recordStatus.currentEpisodeNumber,
+    recordStatus.topicReceived,
+    serverRecording,
+    serverSubtaskCount,
+    serverSubtaskIndex,
+    slotToServerIdx,
+  ]);
 
   const minAllowedCount = useMemo(() => {
     let highest = -1;
@@ -324,63 +382,6 @@ export default function SegmentPanel() {
     setEpisodeAcquisitionStarted(false);
     dispatch(resetSegmentPlan());
   }, [dispatch]);
-
-  footSwitchHandlersRef.current = {
-    activeSlotIndex,
-    handleRecordStart,
-    handleSlotSave,
-    handleSlotTrash,
-    isRecording,
-    isSingleMode,
-    savingInProgress,
-  };
-
-  useEffect(() => {
-    let cancelled = false;
-    if (!rosbridgeUrl) return undefined;
-
-    rosConnectionManager.getConnection(rosbridgeUrl).then((ros) => {
-      if (!ros || cancelled) return;
-
-      const topic = new ROSLIB.Topic({
-        ros,
-        name: '/task/foot_switch_command',
-        messageType: 'std_msgs/msg/String',
-      });
-
-      topic.subscribe((msg) => {
-        const {
-          activeSlotIndex: slot,
-          handleRecordStart: onStart,
-          handleSlotSave: onSave,
-          handleSlotTrash: onCancel,
-          isRecording: rec,
-          isSingleMode: single,
-          savingInProgress: saving,
-        } = footSwitchHandlersRef.current;
-
-        if (saving) return;
-        if (msg.data === 'record_toggle') {
-          if (rec) onSave(single ? 0 : slot);
-          else onStart();
-        } else if (msg.data === 'record_cancel' && rec) {
-          onCancel(slot);
-        }
-      });
-
-      footSwitchTopicRef.current = topic;
-    }).catch((error) => {
-      console.error('Failed to subscribe to foot switch command topic:', error);
-    });
-
-    return () => {
-      cancelled = true;
-      if (footSwitchTopicRef.current) {
-        footSwitchTopicRef.current.unsubscribe();
-        footSwitchTopicRef.current = null;
-      }
-    };
-  }, [rosbridgeUrl]);
 
   useEffect(() => {
     const onKeyUp = (e) => {

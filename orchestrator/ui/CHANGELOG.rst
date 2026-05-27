@@ -2,6 +2,13 @@
 Changelog for package cyclo-ui
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
+0.1.7 (2026-05-27)
+------------------
+* Removed the UI foot-switch command bridge and synced Record subtask progress from backend recording status.
+* Added Inference record session preparation for trigger-driven recordings.
+* Reflected backend-triggered inference recording state in the control panel.
+* Contributors: kimtaehyeong99
+
 0.1.6 (2026-05-27)
 ------------------
 * Reworked BT Manager with drag-and-drop node palette, dynamic node catalog loading, and parameter editing.
