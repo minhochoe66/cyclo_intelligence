@@ -6,7 +6,7 @@ Changelog for package cyclo_data
 ------------------
 * Added behavior tree XML save support to the data file server API.
 * Extended JSON error responses with structured details for tree-save conflicts.
-* Contributors: kimtaehyeong99
+* Contributors: kimtaehyeong99, Seongoo
 
 0.1.5 (2026-05-26)
 ------------------

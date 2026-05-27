@@ -8,7 +8,7 @@ Changelog for package orchestrator
 * Added behavior tree node templates and XML serialization support for generated action and control nodes.
 * Refactored behavior tree actions around joint control, SendCommand model routing, inference lifecycle handling, and monotonic timing.
 * Added tree editing support for save-as workflows, execution completion state, and persistent runtime flow.
-* Contributors: kimtaehyeong99
+* Contributors: kimtaehyeong99, Seongoo
 
 0.1.5 (2026-05-26)
 ------------------

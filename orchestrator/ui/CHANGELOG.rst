@@ -8,7 +8,7 @@ Changelog for package cyclo-ui
 * Added behavior tree XML serialization, save-as handling, tree list modal, undo/redo history, and parser tests.
 * Added persistent BT runtime flow and improved node drop positioning.
 * Optimized RobotViewer3D ROS subscriptions by sharing rosbridge connections, lowering queue depth, and gating action preview subscriptions.
-* Contributors: kimtaehyeong99
+* Contributors: kimtaehyeong99, Seongoo
 
 0.1.5 (2026-05-26)
 ------------------

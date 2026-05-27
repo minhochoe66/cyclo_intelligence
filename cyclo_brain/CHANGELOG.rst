@@ -8,7 +8,7 @@ Changelog for package cyclo_brain
 * Added backend-specific s6 service status reporting for inference and control publisher processes.
 * Improved GR00T TensorRT engine build safety and behavior tree inference lifecycle handling.
 * Updated action chunk processing and policy runtime wiring for synchronized SendCommand execution.
-* Contributors: kimtaehyeong99
+* Contributors: kimtaehyeong99, Seongoo
 
 0.1.5 (2026-05-26)
 ------------------
