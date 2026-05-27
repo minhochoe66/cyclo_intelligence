@@ -2,7 +2,7 @@
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useSelector, useDispatch } from 'react-redux';
 import clsx from 'clsx';
 import toast from 'react-hot-toast';
@@ -53,6 +53,7 @@ export default function SegmentPanel() {
   const [optimisticRecording, setOptimisticRecording] = useState(false);
   const [episodeAcquisitionStarted, setEpisodeAcquisitionStarted] = useState(false);
   const [savingInProgress, setSavingInProgress] = useState(false);
+  const lastServerEpisodeRef = useRef(null);
 
   const serverRecording =
     recordStatus.recordPhase === RecordPhase.RECORDING || Boolean(recordStatus.running);
@@ -95,6 +96,68 @@ export default function SegmentPanel() {
       setEpisodeAcquisitionStarted(true);
     }
   }, [hasLocalSavedSubtasks, hasServerSavedSubtasks, serverRecording]);
+
+  useEffect(() => {
+    if (!recordStatus.topicReceived) return;
+
+    const currentEpisode = Number(recordStatus.currentEpisodeNumber || 0);
+    if (lastServerEpisodeRef.current === null) {
+      lastServerEpisodeRef.current = currentEpisode;
+    } else if (
+      isPlanMode &&
+      !serverRecording &&
+      currentEpisode > lastServerEpisodeRef.current
+    ) {
+      lastServerEpisodeRef.current = currentEpisode;
+      setOptimisticRecording(false);
+      setSavingInProgress(false);
+      setEpisodeAcquisitionStarted(false);
+      dispatch(resetSegmentProgress());
+      return;
+    } else {
+      lastServerEpisodeRef.current = currentEpisode;
+    }
+
+    if (!isPlanMode || serverSubtaskCount <= 0 || plannedCountNumber <= 0) {
+      return;
+    }
+
+    const boundedServerSlot = Math.max(
+      0,
+      Math.min(serverSubtaskIndex, plannedCountNumber - 1)
+    );
+    const syncedSlotMap = slotToServerIdx.map((value, index) => (
+      index < boundedServerSlot && value < 0 ? index : value
+    ));
+    const slotMapChanged = syncedSlotMap.some(
+      (value, index) => value !== slotToServerIdx[index]
+    );
+
+    if (slotMapChanged) {
+      dispatch(setSlotToServerIdx(syncedSlotMap));
+    }
+
+    if (activeSlotIndex !== boundedServerSlot && !planComplete) {
+      dispatch(setActiveSlotIndex(boundedServerSlot));
+    }
+
+    if (serverRecording) {
+      setSavingInProgress(false);
+      setEpisodeAcquisitionStarted(true);
+    }
+  }, [
+    activeSlotIndex,
+    dispatch,
+    isPlanMode,
+    planComplete,
+    plannedCountNumber,
+    recordStatus.currentEpisodeNumber,
+    recordStatus.topicReceived,
+    serverRecording,
+    serverSubtaskCount,
+    serverSubtaskIndex,
+    slotToServerIdx,
+  ]);
 
   const minAllowedCount = useMemo(() => {
     let highest = -1;

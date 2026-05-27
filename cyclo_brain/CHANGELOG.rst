@@ -2,6 +2,10 @@
 Changelog for package cyclo_brain
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
+0.1.7 (2026-05-27)
+------------------
+* None
+
 0.1.6 (2026-05-27)
 ------------------
 * Updated LeRobot and GR00T policy container runtimes for behavior tree inference workflows.

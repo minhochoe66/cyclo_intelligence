@@ -2,6 +2,13 @@
 Changelog for package orchestrator
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
+0.1.7 (2026-05-27)
+------------------
+* Moved leader trigger recording control into the orchestrator backend using right and left tact trigger events.
+* Added prepared Record and Inference recording contexts so trigger input can start, save, and cancel recordings without UI command bridging.
+* Kept inference recording state tied to actual recording start and stop responses.
+* Contributors: kimtaehyeong99
+
 0.1.6 (2026-05-27)
 ------------------
 * Added dynamic behavior tree node discovery, catalog services, and XML tree listing.

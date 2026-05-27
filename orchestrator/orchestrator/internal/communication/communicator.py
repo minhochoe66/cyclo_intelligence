@@ -116,14 +116,15 @@ class Communicator:
             history=HistoryPolicy.KEEP_LAST
         )
 
-        self.init_subscribers()
-        self.init_publishers()
-        self.init_services()
-
         self.joystick_state = {
             'updated': False,
             'mode': None
         }
+
+        self.init_subscribers()
+        self.init_publishers()
+        self.init_services()
+
         # Protects joystick_state — orchestrator_node's timer callback
         # and joystick_trigger_callback both run under
         # MultiThreadedExecutor and would otherwise race on the dict.

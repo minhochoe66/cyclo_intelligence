@@ -61,12 +61,12 @@ const InfoPanel = ({ variant = 'card' }) => {
     setIsEditable(!disabled);
   }, [disabled]);
 
-  // Re-arm the prepare button whenever the task identity changes so the
+  // Re-arm the prepare button whenever the task definition changes so the
   // user has to re-confirm. Solo-recording flow relies on this — editing
-  // task_num/name mid-session should not silently keep an old prep.
+  // task fields mid-session should not silently keep an old prep.
   useEffect(() => {
     setIsPrepared(false);
-  }, [info.taskNum, info.taskName]);
+  }, [info.taskNum, info.taskName, info.taskInstruction, info.subtaskInstruction]);
 
   const canPrepare =
     !disabled &&
@@ -245,11 +245,9 @@ const InfoPanel = ({ variant = 'card' }) => {
         />
       </div>
 
-      {/* ROBOTIS license stamp — opt-in. Default off because recording
-          outputs are the user's intellectual property, not ROBOTIS'.
-          Tick on for ROBOTIS-internal captures so the Apache 2.0
-          header rides through to HF Hub. */}
       <div className={clsx('flex', 'items-center', 'mb-2.5')}>
+        {/* ROBOTIS license stamp — opt-in. Default off because recording
+            outputs are the user's intellectual property, not ROBOTIS'. */}
         <div className={clsx(classLabel, 'flex', 'items-center', 'gap-1')}>
           <Tooltip
             content={
