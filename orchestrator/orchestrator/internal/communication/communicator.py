@@ -40,7 +40,7 @@ from rclpy.qos import (
     QoSProfile,
     ReliabilityPolicy
 )
-from std_msgs.msg import Empty, String
+from std_msgs.msg import Bool, Empty, String
 
 
 class Communicator:
@@ -114,14 +114,16 @@ class Communicator:
             history=HistoryPolicy.KEEP_LAST
         )
 
-        self.init_subscribers()
-        self.init_publishers()
-        self.init_services()
-
         self.joystick_state = {
             'updated': False,
             'mode': None
         }
+        self.middle_pedal_held: bool = False
+
+        self.init_subscribers()
+        self.init_publishers()
+        self.init_services()
+
         # Protects joystick_state — orchestrator_node's timer callback
         # and joystick_trigger_callback both run under
         # MultiThreadedExecutor and would otherwise race on the dict.
@@ -149,6 +151,12 @@ class Communicator:
             String,
             '/leader/joystick_controller/tact_trigger',
             self.joystick_trigger_callback,
+            10
+        )
+        self.middle_pedal_subscriber = self.node.create_subscription(
+            Bool,
+            '/leader/foot_switch/middle_pedal',
+            self.middle_pedal_callback,
             10
         )
         self.node.get_logger().info('Joystick trigger subscriber initialized')
@@ -179,6 +187,12 @@ class Communicator:
             Empty,
             'heartbeat',
             self.heartbeat_qos_profile)
+
+        self.foot_switch_command_publisher = self.node.create_publisher(
+            String,
+            '/task/foot_switch_command',
+            self.PUB_QOS_SIZE
+        )
 
         self.node.get_logger().info('Publishers initialized')
 
@@ -225,6 +239,11 @@ class Communicator:
     # publish_action_event moved to cyclo_data.recorder.rosbag_control.RosbagControl
     # (Step 3 Part C2d-1/-5). Orchestrator no longer owns /task/action_event.
 
+    def publish_foot_switch_command(self, command: str):
+        msg = String()
+        msg.data = command
+        self.foot_switch_command_publisher.publish(msg)
+
     # ========== Joystick Handler ==========
 
     def register_joystick_handler(self, handler: Callable[[str], None]):
@@ -258,6 +277,12 @@ class Communicator:
         with self._joystick_lock:
             self.joystick_state['updated'] = True
             self.joystick_state['mode'] = msg.data
+
+    def middle_pedal_callback(self, msg: Bool):
+        """Track the foot switch middle pedal state for UI bridge commands."""
+        self.middle_pedal_held = msg.data
+        self.node.get_logger().debug(
+            f'Middle pedal: {"held" if msg.data else "released"}')
 
     def consume_joystick_update(self):
         """Atomically read-and-clear ``joystick_state``.
@@ -451,6 +476,7 @@ class Communicator:
         publisher_names = [
             'inference_status_publisher',
             'heartbeat_publisher',
+            'foot_switch_command_publisher',
         ]
         for publisher_name in publisher_names:
             self._destroy_publisher_if_exists(publisher_name)
@@ -460,6 +486,10 @@ class Communicator:
            self.joystick_trigger_subscriber is not None:
             self.node.destroy_subscription(self.joystick_trigger_subscriber)
             self.joystick_trigger_subscriber = None
+        if hasattr(self, 'middle_pedal_subscriber') and \
+           self.middle_pedal_subscriber is not None:
+            self.node.destroy_subscription(self.middle_pedal_subscriber)
+            self.middle_pedal_subscriber = None
 
     def _cleanup_services(self):
         service_names = [

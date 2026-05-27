@@ -2157,93 +2157,38 @@ class OrchestratorNode(Node):
 
     def handle_joystick_trigger(self, joystick_mode: str):
         """
-        Handle joystick trigger for simplified recording control.
+        Bridge leader tact triggers to the Record page's segment controls.
 
-        - Right button: Toggle Start/Finish
-          - If no session: Auto-create session and start recording
-          - If idle: Start recording
-          - If recording: Finish and save
-        - Left button: Cancel (only during recording)
-          - Discards current recording
+        The UI owns sub-task advancement, so joystick events are published as
+        UI commands instead of directly forwarding START/STOP/CANCEL to
+        cyclo_data here.
         """
         self.get_logger().info(f'Joystick trigger: {joystick_mode}')
 
-        # Joystick operations forward to cyclo_data (Part C2d-5). orchestrator
-        # only tracks on_recording / timer_manager session state; DataManager
-        # + rosbag + action_event live in cyclo_data.
-        snapshot_on_recording, _ = self._snapshot_session_state()
+        if self.communicator is None:
+            self.get_logger().warning(
+                f'Joystick trigger ignored without communicator: {joystick_mode}')
+            return
+
         if joystick_mode == 'right':
-            if not snapshot_on_recording:
-                if self._last_ui_task_info is None:
-                    # No task_info yet — auto-create path needs a cached
-                    # task_info to derive folder naming. Match the prior
-                    # behaviour's hard error.
-                    self.get_logger().error(
-                        'Joystick right ignored: start the first episode from '
-                        'the UI so task info (Task Num / Task Name) is set.')
-                    return
-                self.get_logger().info('Right button: Starting recording (forwarder)')
-                # Re-init params (joint_order etc.) for the cached task. Cheap
-                # if the task hasn't changed; sets up the 'collection' timer
-                # slot every time so .start() below succeeds.
-                self.init_robot_control_parameters_from_user_task(
-                    self._last_ui_task_info)
-                if self.timer_manager:
-                    self.timer_manager.start(timer_name='collection')
-                cd_result = self._forward_recording(
-                    RecordingCommand.Request.START,
-                    task_info=self._last_ui_task_info,
-                    include_topics=True,
-                )
-                if (cd_result.success
-                        and cd_result.response is not None
-                        and cd_result.response.success):
-                    self._set_session_active(
-                        on_recording=True,
-                        start_time=time.perf_counter(),
-                    )
-                else:
-                    self.get_logger().error(
-                        f'Joystick START forward failed: '
-                        f'{cd_result.response.message if cd_result.response else cd_result.message}'
-                    )
-            else:
-                self.get_logger().info('Right button: Finishing recording (forwarder)')
-                cd_result = self._forward_recording(
-                    RecordingCommand.Request.STOP,
-                    task_info=self._last_ui_task_info,
-                )
-                # Flip on_recording back to False so the next right press
-                # takes the START branch. Without this, on_recording stays
-                # True forever and every subsequent right press goes to
-                # STOP — which cyclo_data treats as a no-op once its
-                # DataManager has flipped to idle.
-                if (cd_result.success
-                        and cd_result.response is not None
-                        and cd_result.response.success):
-                    self._set_session_active(on_recording=False)
-                else:
-                    self.get_logger().error(
-                        f'Joystick STOP forward failed: '
-                        f'{cd_result.response.message if cd_result.response else cd_result.message}'
-                    )
+            if not self.communicator.middle_pedal_held:
+                self.get_logger().debug(
+                    'Right tact ignored: middle foot pedal not held')
+                return
+            self.get_logger().info('Middle + right tact: record_toggle -> UI')
+            self.communicator.publish_foot_switch_command('record_toggle')
 
         elif joystick_mode == 'left':
-            # cyclo_data's CANCEL handler picks the right mode: cancel-with-
-            # review if actively recording, toggle-review otherwise. Also
-            # publishes the right action_event (cancel / review_on / review_off).
-            self.get_logger().info('Left button: forwarding CANCEL')
-            cd_result = self._forward_recording(
-                RecordingCommand.Request.CANCEL,
-                task_info=self._last_ui_task_info,
-            )
-            # Same reason as STOP above — after CANCEL the cyclo_data
-            # session is idle, so orchestrator's on_recording must follow
-            # or the next right press is stuck in the STOP branch.
-            if (cd_result.success
-                    and cd_result.response is not None
-                    and cd_result.response.success):
-                self._set_session_active(on_recording=False)
+            if not self.communicator.middle_pedal_held:
+                self.get_logger().debug(
+                    'Left tact ignored: middle foot pedal not held')
+                return
+            self.get_logger().info('Middle + left tact: record_cancel -> UI')
+            self.communicator.publish_foot_switch_command('record_cancel')
+
+        elif joystick_mode == 'right_long_time_middle':
+            self.get_logger().info(
+                'Middle + right long press - reserved for future use')
 
         elif joystick_mode == 'right_long_time':
             self.get_logger().info('Right long press - reserved for future use')

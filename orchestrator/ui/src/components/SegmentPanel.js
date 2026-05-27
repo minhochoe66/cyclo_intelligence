@@ -2,10 +2,11 @@
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useSelector, useDispatch } from 'react-redux';
 import clsx from 'clsx';
 import toast from 'react-hot-toast';
+import ROSLIB from 'roslib';
 import {
   MdArrowDropDown,
   MdArrowDropUp,
@@ -27,6 +28,7 @@ import {
   setSlotToServerIdx,
 } from '../features/tasks/taskSlice';
 import { useRosServiceCaller } from '../hooks/useRosServiceCaller';
+import rosConnectionManager from '../utils/rosConnectionManager';
 import InfoPanel from './InfoPanel';
 import Tooltip from './Tooltip';
 
@@ -49,10 +51,13 @@ export default function SegmentPanel() {
   const plannedSubTasks = useSelector((state) => state.tasks.plannedSubTasks);
   const slotToServerIdx = useSelector((state) => state.tasks.slotToServerIdx);
   const activeSlotIndex = useSelector((state) => state.tasks.activeSlotIndex);
+  const rosbridgeUrl = useSelector((state) => state.ros.rosbridgeUrl);
 
   const [optimisticRecording, setOptimisticRecording] = useState(false);
   const [episodeAcquisitionStarted, setEpisodeAcquisitionStarted] = useState(false);
   const [savingInProgress, setSavingInProgress] = useState(false);
+  const footSwitchTopicRef = useRef(null);
+  const footSwitchHandlersRef = useRef({});
 
   const serverRecording =
     recordStatus.recordPhase === RecordPhase.RECORDING || Boolean(recordStatus.running);
@@ -319,6 +324,63 @@ export default function SegmentPanel() {
     setEpisodeAcquisitionStarted(false);
     dispatch(resetSegmentPlan());
   }, [dispatch]);
+
+  footSwitchHandlersRef.current = {
+    activeSlotIndex,
+    handleRecordStart,
+    handleSlotSave,
+    handleSlotTrash,
+    isRecording,
+    isSingleMode,
+    savingInProgress,
+  };
+
+  useEffect(() => {
+    let cancelled = false;
+    if (!rosbridgeUrl) return undefined;
+
+    rosConnectionManager.getConnection(rosbridgeUrl).then((ros) => {
+      if (!ros || cancelled) return;
+
+      const topic = new ROSLIB.Topic({
+        ros,
+        name: '/task/foot_switch_command',
+        messageType: 'std_msgs/msg/String',
+      });
+
+      topic.subscribe((msg) => {
+        const {
+          activeSlotIndex: slot,
+          handleRecordStart: onStart,
+          handleSlotSave: onSave,
+          handleSlotTrash: onCancel,
+          isRecording: rec,
+          isSingleMode: single,
+          savingInProgress: saving,
+        } = footSwitchHandlersRef.current;
+
+        if (saving) return;
+        if (msg.data === 'record_toggle') {
+          if (rec) onSave(single ? 0 : slot);
+          else onStart();
+        } else if (msg.data === 'record_cancel' && rec) {
+          onCancel(slot);
+        }
+      });
+
+      footSwitchTopicRef.current = topic;
+    }).catch((error) => {
+      console.error('Failed to subscribe to foot switch command topic:', error);
+    });
+
+    return () => {
+      cancelled = true;
+      if (footSwitchTopicRef.current) {
+        footSwitchTopicRef.current.unsubscribe();
+        footSwitchTopicRef.current = null;
+      }
+    };
+  }, [rosbridgeUrl]);
 
   useEffect(() => {
     const onKeyUp = (e) => {
