@@ -141,18 +141,11 @@ def active_h264_encoder_label() -> str:
     """Return the user-facing active H.264 encoder selection."""
     explicit = os.environ.get("CYCLO_H264_ENCODER")
     if explicit:
-        if explicit.strip().lower() in {
-            "gstreamer",
-            "gst",
-            "jetson_gst",
-            "nvv4l2h264enc",
-        }:
-            return "gstreamer:nvv4l2h264enc"
         return explicit
     profile = os.environ.get("CYCLO_X264_SPEED_PROFILE", "").strip().lower()
     if profile in {"max", "maximum", "max_speed", "fastest"}:
-        return "auto (max profile)"
-    return "default"
+        return "libx264 (max profile)"
+    return "libx264"
 
 
 def active_h264_decoder_label() -> str:
@@ -344,9 +337,6 @@ Examples:
             "auto",
             "software",
             "libx264",
-            "gstreamer",
-            "jetson_gst",
-            "nvv4l2h264enc",
             "h264_nvenc",
             "h264_nvmpi",
             "h264_v4l2m2m",
@@ -355,8 +345,8 @@ Examples:
         ],
         default=None,
         help=(
-            "H.264 encoder selection. Defaults to CYCLO_H264_ENCODER, "
-            "Jetson/Orin auto-probe, or portable libx264 on ordinary hosts."
+            "H.264 encoder selection. Defaults to portable libx264; hardware "
+            "encoders are opt-in because measured conversion is CPU-fastest."
         ),
     )
     parser.add_argument(
@@ -372,8 +362,7 @@ Examples:
         default=None,
         help=(
             "H.264 decoder selection for raw-video sync/aggregation. "
-            "Defaults to CYCLO_H264_DECODER, Jetson/Orin auto-probe, or "
-            "portable software decode on ordinary hosts."
+            "Defaults to portable software decode; hardware decode is opt-in."
         ),
     )
 

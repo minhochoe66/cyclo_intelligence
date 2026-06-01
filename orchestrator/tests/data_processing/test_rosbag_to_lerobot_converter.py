@@ -1100,7 +1100,7 @@ class TestVideoSyncWorkerPolicy(unittest.TestCase):
         with patch.dict(os.environ, {"CYCLO_H264_DECODER": "software"}, clear=True):
             self.assertEqual(convert_cli.active_h264_decoder_label(), "software")
 
-    def test_cli_h264_encoder_label_mentions_max_auto(self):
+    def test_cli_h264_encoder_label_mentions_max_libx264(self):
         with patch.dict(
             os.environ,
             {"CYCLO_X264_SPEED_PROFILE": "max"},
@@ -1108,7 +1108,7 @@ class TestVideoSyncWorkerPolicy(unittest.TestCase):
         ):
             self.assertEqual(
                 convert_cli.active_h264_encoder_label(),
-                "auto (max profile)",
+                "libx264 (max profile)",
             )
 
         with patch.dict(
@@ -5065,11 +5065,7 @@ class TestVideoSyncTempResources(unittest.TestCase):
         self.assertEqual(opts, ["-preset", "ultrafast", "-crf", "23"])
         mock_try_encoder.assert_not_called()
 
-    def test_h264_encoder_max_speed_profile_auto_selects_hardware(self):
-        probe_result = types.SimpleNamespace(
-            stdout=" V....D h264_nvenc\n V....D libx264\n",
-            returncode=0,
-        )
+    def test_h264_encoder_max_speed_profile_defaults_to_libx264(self):
         with patch.dict(
             os.environ,
             {"CYCLO_X264_SPEED_PROFILE": "max"},
@@ -5077,22 +5073,26 @@ class TestVideoSyncTempResources(unittest.TestCase):
         ), patch.object(
             video_sync, "_running_on_jetson", return_value=False
         ), patch.object(
-            video_sync, "_H264_ENCODER_CACHE", None
-        ), patch.object(
-            video_sync.subprocess, "run", return_value=probe_result
-        ), patch.object(
-            video_sync, "_try_encoder", return_value=True
-        ):
+            video_sync, "_try_encoder"
+        ) as mock_try_encoder:
             encoder, opts = video_sync._h264_encoder(
                 "ffmpeg",
                 width=640,
                 height=480,
             )
 
-        self.assertEqual(encoder, "h264_nvenc")
-        self.assertIn("p1", opts)
-        self.assertIn("constqp", opts)
-        self.assertIn("51", opts)
+        self.assertEqual(encoder, "libx264")
+        self.assertEqual(
+            opts,
+            [
+                "-preset", "ultrafast",
+                "-qp", "51",
+                "-tune", "zerolatency",
+                "-g", "1",
+                "-threads", "1",
+            ],
+        )
+        mock_try_encoder.assert_not_called()
 
     def test_h264_encoder_max_speed_software_fallback_uses_fastest_qp(self):
         with patch.dict(
@@ -5184,32 +5184,10 @@ class TestVideoSyncTempResources(unittest.TestCase):
         self.assertEqual(opts[-2:], ["-threads", "2"])
         mock_try_encoder.assert_not_called()
 
-    def test_h264_encoder_auto_cache_keys_x264_threads_env(self):
-        probe_result = subprocess.CompletedProcess(
-            args=["ffmpeg", "-encoders"],
-            returncode=0,
-            stdout=" V....D libx264 H.264 / AVC / MPEG-4 AVC / MPEG-4 part 10",
-            stderr="",
-        )
-
-        def fake_try_encoder(ffmpeg, encoder, opts):
-            return encoder == "libx264"
-
-        with patch.object(video_sync, "_H264_ENCODER_CACHE", {}), patch.object(
+    def test_h264_encoder_auto_uses_current_x264_threads_env(self):
+        with patch.object(
             video_sync, "_running_on_jetson", return_value=False
-        ), patch.object(
-            video_sync.subprocess,
-            "run",
-            return_value=probe_result,
-        ), patch.object(
-            video_sync,
-            "_h264_hardware_encoder_candidates",
-            return_value=[],
-        ), patch.object(
-            video_sync,
-            "_try_encoder",
-            side_effect=fake_try_encoder,
-        ) as mock_try_encoder:
+        ), patch.object(video_sync, "_try_encoder") as mock_try_encoder:
             with patch.dict(
                 os.environ,
                 {
@@ -5241,7 +5219,7 @@ class TestVideoSyncTempResources(unittest.TestCase):
         self.assertEqual(second_encoder, "libx264")
         self.assertEqual(first_opts[-2:], ["-threads", "2"])
         self.assertEqual(second_opts[-2:], ["-threads", "3"])
-        self.assertEqual(mock_try_encoder.call_count, 2)
+        mock_try_encoder.assert_not_called()
 
     def test_h264_encoder_honors_x264_tuning_env(self):
         env = {
@@ -5286,14 +5264,8 @@ class TestVideoSyncTempResources(unittest.TestCase):
             ["-preset", "veryfast", "-crf", "30", "-tune", "zerolatency"],
         )
 
-    def test_h264_encoder_auto_can_select_nvenc_for_real_dimensions(self):
-        probe_result = types.SimpleNamespace(
-            stdout=" V....D h264_nvenc\n V....D libx264\n",
-            returncode=0,
-        )
-        with patch.dict(os.environ, {"CYCLO_H264_ENCODER": "auto"}, clear=True), \
-            patch.object(video_sync, "_H264_ENCODER_CACHE", None), \
-            patch.object(video_sync.subprocess, "run", return_value=probe_result), \
+    def test_h264_encoder_explicit_nvenc_for_real_dimensions(self):
+        with patch.dict(os.environ, {"CYCLO_H264_ENCODER": "h264_nvenc"}, clear=True), \
             patch.object(video_sync, "_try_encoder", return_value=True):
             encoder, opts = video_sync._h264_encoder(
                 "ffmpeg",
@@ -5306,65 +5278,51 @@ class TestVideoSyncTempResources(unittest.TestCase):
         self.assertIn("vbr", opts)
         self.assertIn("23", opts)
 
-    def test_h264_encoder_auto_cache_is_speed_profile_specific(self):
-        probe_result = types.SimpleNamespace(
-            stdout=" V....D h264_nvenc\n V....D libx264\n",
-            returncode=0,
-        )
-        cache: Dict[Tuple[str, ...], List[str]] = {}
-        with patch.object(video_sync, "_H264_ENCODER_CACHE", cache), patch.object(
-            video_sync.subprocess,
-            "run",
-            return_value=probe_result,
-        ), patch.object(video_sync, "_try_encoder", return_value=True):
+    def test_h264_encoder_explicit_nvenc_is_speed_profile_specific(self):
+        with patch.object(video_sync, "_try_encoder", return_value=True):
             with patch.dict(
                 os.environ,
-                {"CYCLO_X264_SPEED_PROFILE": "max"},
+                {
+                    "CYCLO_H264_ENCODER": "h264_nvenc",
+                    "CYCLO_X264_SPEED_PROFILE": "max",
+                },
                 clear=True,
             ):
-                _, max_opts = video_sync._h264_encoder(
+                max_encoder, max_opts = video_sync._h264_encoder(
                     "ffmpeg",
                     width=640,
                     height=480,
                 )
             with patch.dict(
                 os.environ,
-                {"CYCLO_H264_ENCODER": "auto"},
+                {"CYCLO_H264_ENCODER": "h264_nvenc"},
                 clear=True,
             ):
-                _, normal_opts = video_sync._h264_encoder(
+                normal_encoder, normal_opts = video_sync._h264_encoder(
                     "ffmpeg",
                     width=640,
                     height=480,
                 )
 
+        self.assertEqual(max_encoder, "h264_nvenc")
+        self.assertEqual(normal_encoder, "h264_nvenc")
         self.assertIn("constqp", max_opts)
         self.assertIn("vbr", normal_opts)
 
-    def test_h264_encoder_auto_probe_is_cached(self):
-        probe_result = types.SimpleNamespace(
-            stdout=" V....D h264_nvenc\n V....D libx264\n",
-            returncode=0,
-        )
-        cache: Dict[Tuple[str, ...], List[str]] = {}
+    def test_h264_encoder_auto_skips_hardware_probe(self):
         with patch.dict(os.environ, {"CYCLO_H264_ENCODER": "auto"}, clear=True), \
-            patch.object(video_sync, "_H264_ENCODER_CACHE", cache), \
-            patch.object(video_sync.subprocess, "run", return_value=probe_result) as mock_run, \
-            patch.object(video_sync, "_try_encoder", return_value=True):
+            patch.object(video_sync.subprocess, "run") as mock_run, \
+            patch.object(video_sync, "_try_encoder") as mock_try_encoder:
             first = video_sync._h264_encoder("ffmpeg", width=640, height=480)
             second = video_sync._h264_encoder("ffmpeg", width=640, height=480)
 
         self.assertEqual(first, second)
-        mock_run.assert_called_once()
+        self.assertEqual(first[0], "libx264")
+        mock_run.assert_not_called()
+        mock_try_encoder.assert_not_called()
 
-    def test_h264_encoder_auto_can_select_jetson_nvmpi(self):
-        probe_result = types.SimpleNamespace(
-            stdout=" V..... h264_nvmpi\n V....D libx264\n",
-            returncode=0,
-        )
-        with patch.dict(os.environ, {"CYCLO_H264_ENCODER": "auto"}, clear=True), \
-            patch.object(video_sync, "_H264_ENCODER_CACHE", None), \
-            patch.object(video_sync.subprocess, "run", return_value=probe_result), \
+    def test_h264_encoder_can_force_jetson_nvmpi(self):
+        with patch.dict(os.environ, {"CYCLO_H264_ENCODER": "jetson"}, clear=True), \
             patch.object(video_sync, "_try_encoder", return_value=True):
             encoder, opts = video_sync._h264_encoder(
                 "ffmpeg",
@@ -5375,64 +5333,19 @@ class TestVideoSyncTempResources(unittest.TestCase):
         self.assertEqual(encoder, "h264_nvmpi")
         self.assertEqual(opts, ["-b:v", "5M"])
 
-    def test_h264_encoder_defaults_to_auto_on_jetson(self):
-        probe_result = types.SimpleNamespace(
-            stdout=" V....D h264_nvenc\n V..... h264_nvmpi\n V....D libx264\n",
-            returncode=0,
-        )
+    def test_h264_encoder_defaults_to_libx264_on_jetson(self):
         with patch.dict(os.environ, {}, clear=True), \
             patch.object(video_sync, "_running_on_jetson", return_value=True), \
-            patch.object(video_sync, "_H264_ENCODER_CACHE", None), \
-            patch.object(video_sync.subprocess, "run", return_value=probe_result), \
-            patch.object(video_sync, "_try_encoder", return_value=True):
+            patch.object(video_sync, "_try_encoder") as mock_try_encoder:
             encoder, opts = video_sync._h264_encoder(
                 "ffmpeg",
                 width=640,
                 height=480,
-            )
-
-        self.assertEqual(encoder, "h264_nvmpi")
-        self.assertEqual(opts, ["-b:v", "5M"])
-
-    def test_h264_encoder_allow_gstreamer_prefers_jetson_gst(self):
-        probe_result = types.SimpleNamespace(
-            stdout=" V..... h264_nvmpi\n V....D libx264\n",
-            returncode=0,
-        )
-        with patch.dict(os.environ, {}, clear=True), \
-            patch.object(video_sync, "_running_on_jetson", return_value=True), \
-            patch.object(video_sync, "_H264_ENCODER_CACHE", {}), \
-            patch.object(video_sync.subprocess, "run", return_value=probe_result), \
-            patch.object(video_sync, "_try_encoder", return_value=True):
-            encoder, opts = video_sync._h264_encoder(
-                "ffmpeg",
-                width=640,
-                height=480,
-                allow_gstreamer=True,
-            )
-
-        self.assertEqual(encoder, "gstreamer:nvv4l2h264enc")
-        self.assertEqual(opts, ["bitrate=5000000"])
-
-    def test_h264_encoder_explicit_gstreamer_falls_back_when_unavailable(self):
-        with patch.dict(
-            os.environ,
-            {"CYCLO_H264_ENCODER": "gstreamer"},
-            clear=True,
-        ), patch.object(
-            video_sync,
-            "_try_gstreamer_h264_encoder",
-            return_value=False,
-        ):
-            encoder, opts = video_sync._h264_encoder(
-                "ffmpeg",
-                width=640,
-                height=480,
-                allow_gstreamer=True,
             )
 
         self.assertEqual(encoder, "libx264")
         self.assertIn("-preset", opts)
+        mock_try_encoder.assert_not_called()
 
     def test_h264_encoder_can_force_jetson_alias_with_probe_fallback(self):
         with patch.dict(
@@ -5460,40 +5373,6 @@ class TestVideoSyncTempResources(unittest.TestCase):
 
         self.assertEqual(encoder, "libx264")
         mock_try_encoder.assert_not_called()
-
-    def test_gstreamer_h264_command_uses_i420_rawvideoparse_pipeline(self):
-        with patch.object(video_sync, "_gstreamer_bin", return_value="gst-launch-1.0"):
-            cmd = video_sync._gstreamer_h264_command(
-                input_pix_fmt="yuv420p",
-                width=640,
-                height=480,
-                fps=15,
-                output_mp4=Path("/tmp/out.mp4"),
-                opts=["bitrate=7000000"],
-            )
-
-        self.assertEqual(cmd[0], "gst-launch-1.0")
-        self.assertIn("rawvideoparse", cmd)
-        self.assertIn("format=i420", cmd)
-        self.assertIn("nvv4l2h264enc", cmd)
-        self.assertIn("bitrate=7000000", cmd)
-        self.assertIn("location=/tmp/out.mp4", cmd)
-
-    def test_gstreamer_h264_decoder_command_uses_nvv4l2decoder_pipeline(self):
-        with patch.object(video_sync, "_gstreamer_bin", return_value="gst-launch-1.0"):
-            cmd = video_sync._gstreamer_h264_decoder_command(
-                input_mp4=Path("/tmp/in.mp4"),
-                output_fd=42,
-            )
-
-        self.assertEqual(cmd[0], "gst-launch-1.0")
-        self.assertIn("qtdemux", cmd)
-        self.assertIn("h264parse", cmd)
-        self.assertIn("nvv4l2decoder", cmd)
-        self.assertIn("nvvidconv", cmd)
-        self.assertIn("video/x-raw,format=I420", cmd)
-        self.assertIn("fdsink", cmd)
-        self.assertIn("fd=42", cmd)
 
     def test_decode_validation_uses_opencv_fast_path(self):
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -5873,37 +5752,6 @@ class TestVideoSyncTempResources(unittest.TestCase):
         self.assertIs(result, expected)
         yuv_pipe.assert_called_once()
 
-    def test_streaming_prefers_gstreamer_decode_pipe_on_jetson(self):
-        expected = video_sync.VideoSyncResult(
-            frame_count=1,
-            mode="gstreamer_decode_encode",
-            output_height=480,
-            output_width=640,
-        )
-        with patch.dict(os.environ, {}, clear=True), \
-            patch.object(
-                video_sync,
-                "_remux_selected_frames_gstreamer_yuv420_pipe",
-                return_value=expected,
-            ) as gst_pipe, \
-            patch.object(
-                video_sync,
-                "_remux_selected_frames_ffmpeg_yuv420_pipe",
-                side_effect=AssertionError("ffmpeg YUV path should not run"),
-            ):
-            result = video_sync._remux_selected_frames_streaming(
-                input_mp4=Path("input.mp4"),
-                frame_indices=[0],
-                output_mp4=Path("output.mp4"),
-                target_fps=30,
-                rotation_deg=0,
-                image_resize=None,
-                ffmpeg="ffmpeg",
-            )
-
-        self.assertIs(result, expected)
-        gst_pipe.assert_called_once()
-
     def test_streaming_can_disable_yuv420_ffmpeg_pipe(self):
         expected = video_sync.VideoSyncResult(frame_count=1, mode="stream_encode")
         with patch.dict(
@@ -5938,7 +5786,7 @@ class TestVideoSyncTempResources(unittest.TestCase):
             "cpu_count",
             return_value=8,
         ):
-                self.assertEqual(video_sync._ffmpeg_threads_arg(), ["-threads", "2"])
+            self.assertEqual(video_sync._ffmpeg_threads_arg(), ["-threads", "2"])
         with patch.dict(os.environ, {}, clear=True), patch.object(
             video_sync.os,
             "cpu_count",
@@ -5980,24 +5828,19 @@ class TestVideoSyncTempResources(unittest.TestCase):
                 ["-c:v", "h264_cuvid"],
             )
 
-    def test_h264_decoder_defaults_to_jetson_hardware_probe_on_jetson(self):
-        def supports(_ffmpeg, decoder):
-            return decoder == "h264_nvmpi"
-
+    def test_h264_decoder_defaults_to_software_on_jetson(self):
         with patch.dict(os.environ, {}, clear=True), patch.object(
             video_sync, "_running_on_jetson", return_value=True
         ), patch.object(
             video_sync,
             "_ffmpeg_supports_h264_cuvid",
             side_effect=AssertionError(
-                "Jetson default should try Jetson decoders first"
+                "Jetson default should not probe hardware decoders"
             ),
-        ), patch.object(
-            video_sync, "_ffmpeg_supports_h264_decoder", side_effect=supports
-        ):
+        ), patch.object(video_sync.os, "cpu_count", return_value=8):
             self.assertEqual(
                 video_sync._ffmpeg_h264_decoder_args("ffmpeg"),
-                ["-c:v", "h264_nvmpi"],
+                ["-threads", "2"],
             )
 
     def test_h264_decoder_jetson_alias_can_use_v4l2m2m_fallback(self):
@@ -6403,188 +6246,8 @@ class TestVideoSyncTempResources(unittest.TestCase):
             self.assertEqual(result.mode, "stream_encode")
             self.assertEqual(encoder_stdin.getvalue(), frame0 + frame1)
             self.assertIn("h264_nvmpi", commands[0])
-
-    def test_yuv420_pipe_can_use_gstreamer_encoder(self):
-        with tempfile.TemporaryDirectory() as tmpdir:
-            tmp = Path(tmpdir)
-            input_mp4 = tmp / "input.mp4"
-            output_mp4 = tmp / "out.mp4"
-            input_mp4.write_bytes(b"fake")
-            frame0 = bytes([0, 1, 2, 3, 4, 5])
-            frame1 = bytes([6, 7, 8, 9, 10, 11])
-            commands = []
-            encoder_stdin = io.BytesIO()
-
-            class DecoderProcess:
-                def __init__(self):
-                    self.stdout = io.BytesIO(frame0 + frame1)
-                    self.stderr = io.BytesIO()
-
-                def poll(self):
-                    return None
-
-                def kill(self):
-                    pass
-
-            class EncoderStdin:
-                closed = False
-
-                def write(self, data):
-                    encoder_stdin.write(data)
-
-                def fileno(self):
-                    raise OSError("no fd")
-
-                def close(self):
-                    self.closed = True
-
-            class EncoderProcess:
-                def __init__(self):
-                    self.stdin = EncoderStdin()
-                    self.stderr = io.BytesIO()
-
-                def wait(self, timeout=None):
-                    output_mp4.write_bytes(b"mp4")
-                    return 0
-
-                def poll(self):
-                    return 0
-
-                def kill(self):
-                    pass
-
-            def fake_popen(cmd, *args, **kwargs):
-                commands.append(list(cmd))
-                if "pipe:1" in cmd:
-                    return DecoderProcess()
-                return EncoderProcess()
-
-            with patch.object(
-                video_sync, "_quick_video_dimensions", return_value=(2, 2)
-            ), patch.object(
-                video_sync.subprocess, "Popen", side_effect=fake_popen
-            ), patch.object(
-                video_sync,
-                "_h264_encoder",
-                return_value=("gstreamer:nvv4l2h264enc", ["bitrate=5000000"]),
-            ), patch.object(
-                video_sync, "_gstreamer_bin", return_value="gst-launch-1.0"
-            ), patch.object(
-                video_sync, "_video_frame_count_and_fps", return_value=(2, 15.0)
-            ), patch.object(
-                video_sync, "_video_decodes_successfully", return_value=True
-            ):
-                result = video_sync._remux_selected_frames_ffmpeg_yuv420_pipe(
-                    input_mp4=input_mp4,
-                    frame_indices=[0, 1],
-                    output_mp4=output_mp4,
-                    target_fps=15,
-                    rotation_deg=0,
-                    image_resize=None,
-                    ffmpeg="ffmpeg",
-                )
-
-            self.assertEqual(result.mode, "gstreamer_encode")
-            self.assertEqual(encoder_stdin.getvalue(), frame0 + frame1)
-            self.assertIn("rawvideoparse", commands[1])
-            self.assertIn("nvv4l2h264enc", commands[1])
             self.assertIn("-fps_mode", commands[0])
             self.assertIn("passthrough", commands[0])
-
-    def test_gstreamer_decode_pipe_uses_gst_decoder_and_encoder(self):
-        with tempfile.TemporaryDirectory() as tmpdir:
-            tmp = Path(tmpdir)
-            input_mp4 = tmp / "input.mp4"
-            output_mp4 = tmp / "out.mp4"
-            input_mp4.write_bytes(b"fake")
-            frame0 = bytes([0, 1, 2, 3, 4, 5])
-            frame1 = bytes([6, 7, 8, 9, 10, 11])
-            commands = []
-            encoder_stdin = io.BytesIO()
-
-            class DecoderProcess:
-                def poll(self):
-                    return None
-
-                def kill(self):
-                    pass
-
-            class EncoderStdin:
-                closed = False
-
-                def write(self, data):
-                    encoder_stdin.write(data)
-
-                def fileno(self):
-                    raise OSError("no fd")
-
-                def close(self):
-                    self.closed = True
-
-            class EncoderProcess:
-                def __init__(self):
-                    self.stdin = EncoderStdin()
-                    self.stderr = io.BytesIO()
-
-                def wait(self, timeout=None):
-                    output_mp4.write_bytes(b"mp4")
-                    return 0
-
-                def poll(self):
-                    return 0
-
-                def kill(self):
-                    pass
-
-            def fake_open_decoder(path):
-                self.assertEqual(path, input_mp4)
-                return DecoderProcess(), io.BytesIO(frame0 + frame1)
-
-            def fake_popen(cmd, *args, **kwargs):
-                commands.append(list(cmd))
-                return EncoderProcess()
-
-            with patch.object(
-                video_sync, "_running_on_jetson", return_value=True
-            ), patch.object(
-                video_sync, "_quick_video_dimensions", return_value=(2, 2)
-            ), patch.object(
-                video_sync,
-                "_probe_video_stream",
-                return_value={"codec_name": "h264"},
-            ), patch.object(
-                video_sync, "_try_gstreamer_h264_decoder", return_value=True
-            ), patch.object(
-                video_sync,
-                "_h264_encoder",
-                return_value=("gstreamer:nvv4l2h264enc", ["bitrate=5000000"]),
-            ), patch.object(
-                video_sync, "_gstreamer_bin", return_value="gst-launch-1.0"
-            ), patch.object(
-                video_sync,
-                "_open_gstreamer_h264_decoder_stdout",
-                side_effect=fake_open_decoder,
-            ), patch.object(
-                video_sync.subprocess, "Popen", side_effect=fake_popen
-            ), patch.object(
-                video_sync, "_video_frame_count_and_fps", return_value=(2, 15.0)
-            ), patch.object(
-                video_sync, "_video_decodes_successfully", return_value=True
-            ):
-                result = video_sync._remux_selected_frames_gstreamer_yuv420_pipe(
-                    input_mp4=input_mp4,
-                    frame_indices=[0, 1],
-                    output_mp4=output_mp4,
-                    target_fps=15,
-                    rotation_deg=0,
-                    image_resize=None,
-                    ffmpeg="ffmpeg",
-                )
-
-            self.assertEqual(result.mode, "gstreamer_decode_encode")
-            self.assertEqual(encoder_stdin.getvalue(), frame0 + frame1)
-            self.assertIn("rawvideoparse", commands[0])
-            self.assertIn("nvv4l2h264enc", commands[0])
 
     def test_streaming_uses_opencv_backend_by_default(self):
         expected = video_sync.VideoSyncResult(frame_count=1, mode="stream_encode")
