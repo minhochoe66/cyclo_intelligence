@@ -89,6 +89,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[3]))
 DEFAULT_DATA_FILE_SIZE_IN_MB = 100
 DEFAULT_VIDEO_FILE_SIZE_IN_MB = 200
 _ROSBAG_SEARCH_PRUNE_DIRS = {
+    ".cache",
     ".cyclo_cache",
     "_direct_aggregate_fallback",
     "_stitched_subtasks",
@@ -202,7 +203,10 @@ def find_rosbags_in_directory(directory: Path) -> list[Path]:
         prune.update(name for name in dirnames if name.endswith("_converted"))
         if has_episode_info or has_rosbag:
             prune.add("videos")
-        dirnames[:] = [name for name in dirnames if name not in prune]
+        dirnames[:] = [
+            name for name in dirnames
+            if name not in prune and not name.startswith(".")
+        ]
 
     return sorted(rosbags, key=sort_key)
 

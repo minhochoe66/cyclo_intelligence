@@ -4602,7 +4602,15 @@ class TestRosbagToLerobotV30VideoConcat(unittest.TestCase):
         self.assertIn("yuv420p", cmd)
         self.assertIn("-an", cmd)
         self.assertIn("-r", cmd)
-        self.assertIn("fps=15,setpts=N/(15*TB)", cmd)
+        filter_complex = cmd[cmd.index("-filter_complex") + 1]
+        self.assertIn("[0:v]fps=15,setpts=PTS-STARTPTS[v0]", filter_complex)
+        self.assertIn("[1:v]fps=15,setpts=PTS-STARTPTS[v1]", filter_complex)
+        self.assertIn(
+            "[v0][v1]concat=n=2:v=1:a=0,fps=15,setpts=N/(15*TB)[outv]",
+            filter_complex,
+        )
+        self.assertIn("-map", cmd)
+        self.assertIn("[outv]", cmd)
         self.assertNotIn("copy", cmd)
 
     @patch("cyclo_data.converter.to_lerobot_v30.subprocess.run")

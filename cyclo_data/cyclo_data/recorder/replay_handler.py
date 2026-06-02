@@ -310,9 +310,11 @@ class ReplayDataHandler:
             sidecar_by_camera: Dict[str, Any] = {}
             if videos_dir.exists() and load_frame_timestamps is not None:
                 for sidecar in sorted(
-                    videos_dir.glob("*_timestamps.parquet")
+                    videos_dir.rglob("*_timestamps.parquet")
                 ):
                     cam_name = sidecar.stem[: -len("_timestamps")]
+                    if cam_name in sidecar_by_camera:
+                        continue
                     try:
                         sidecar_by_camera[cam_name] = load_frame_timestamps(
                             sidecar, cam_name
@@ -324,12 +326,14 @@ class ReplayDataHandler:
 
             # Process video files
             if videos_dir.exists():
-                for video_file in sorted(videos_dir.glob("*.mp4")):
+                for video_file in sorted(videos_dir.rglob("*.mp4")):
                     if video_file.stem.endswith("_synced"):
                         # Skip converter-side derivatives that happen to
                         # live in the same dir.
                         continue
-                    result["video_files"].append(f"videos/{video_file.name}")
+                    result["video_files"].append(
+                        video_file.relative_to(bag_path_obj).as_posix()
+                    )
 
                     # Find matching topic
                     video_name = video_file.stem

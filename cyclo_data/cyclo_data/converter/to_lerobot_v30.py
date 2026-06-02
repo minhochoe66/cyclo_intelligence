@@ -3422,18 +3422,30 @@ class RosbagToLerobotV30Converter(RosbagToLerobotConverterBase):
                 width=encoder_width,
                 height=encoder_height,
             )
+            input_args: List[str] = []
+            filter_parts: List[str] = []
+            concat_inputs: List[str] = []
+            for idx, (_, video_path, _) in enumerate(videos):
+                input_args.extend(["-i", str(video_path)])
+                label = f"v{idx}"
+                filter_parts.append(
+                    f"[{idx}:v]fps={fps_str},setpts=PTS-STARTPTS[{label}]"
+                )
+                concat_inputs.append(f"[{label}]")
+            filter_parts.append(
+                "".join(concat_inputs)
+                + f"concat=n={len(videos)}:v=1:a=0,"
+                + f"fps={fps_str},setpts=N/({fps_str}*TB)[outv]"
+            )
             cmd = [
                 ffmpeg,
                 "-y",
                 *_ffmpeg_threads_arg(),
-                "-f",
-                "concat",
-                "-safe",
-                "0",
-                "-i",
-                concat_list_path,
-                "-vf",
-                f"fps={fps_str},setpts=N/({fps_str}*TB)",
+                *input_args,
+                "-filter_complex",
+                ";".join(filter_parts),
+                "-map",
+                "[outv]",
                 "-r",
                 fps_str,
                 "-an",
