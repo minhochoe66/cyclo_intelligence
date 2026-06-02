@@ -4017,7 +4017,7 @@ class RosbagToLerobotConverterBase:
                 ordered.append((video_dir, set(cameras)))
         else:
             videos_root = bag_path / "videos"
-            if videos_root.exists():
+            if videos_root.is_dir():
                 for mcap_path in sorted(bag_path.glob("*.mcap")):
                     video_dir = videos_root / mcap_path.stem
                     if not video_dir.exists():

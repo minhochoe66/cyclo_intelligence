@@ -219,7 +219,9 @@ const InfoPanel = ({ variant = 'card' }) => {
       ));
       toast.error(`Prepare failed: ${error.message || error}`);
     } finally {
-      setIsPreparing(false);
+      if (syncGenerationRef.current === generation) {
+        setIsPreparing(false);
+      }
     }
   }, [canPrepare, dispatch, hasTaskIdentity, sendRecordCommand]);
 

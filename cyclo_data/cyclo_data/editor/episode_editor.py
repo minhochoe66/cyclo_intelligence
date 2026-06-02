@@ -207,7 +207,10 @@ def _rename_video_segment_dirs(episode_dir: Path, new_index: int) -> None:
             continue
         target = videos_dir / new_name
         if target.exists():
-            continue
+            raise FileExistsError(
+                f"Cannot rename segment directory to {new_name} "
+                f"because it already exists."
+            )
         segment_dir.rename(target)
 
 

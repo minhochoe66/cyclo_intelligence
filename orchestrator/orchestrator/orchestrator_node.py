@@ -313,7 +313,7 @@ class OrchestratorNode(Node):
     def _cache_ui_task_info(self, task_info: TaskInfo, source: str) -> None:
         """Cache latest UI task_info for UI and joystick-triggered starts."""
         previous_record_signature = self._task_info_record_signature(
-            self._prepared_record_task_info
+            getattr(self, '_prepared_record_task_info', None)
         )
         self._last_ui_task_info = task_info
 

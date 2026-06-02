@@ -285,7 +285,6 @@ const taskSlice = createSlice({
           state.taskInfoSync.syncStatus = 'synced';
           state.taskInfoSync.syncMessage = SYNCED_MESSAGE;
         } else if (
-          state.taskInfoSync.editBaseServerTaskKey &&
           serverTaskKey !== state.taskInfoSync.editBaseServerTaskKey
         ) {
           state.taskInfoSync.conflict = true;
