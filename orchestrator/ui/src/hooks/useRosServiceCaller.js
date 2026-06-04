@@ -238,7 +238,7 @@ export function useRosServiceCaller() {
           (k) => Number(cameraRotations[k] || 0),
         );
         const imageResize = options.imageResize || null;
-        const inferenceMode = taskInfo.inferenceMode || 'simulation';
+        const inferenceMode = options.inferenceMode || taskInfo.inferenceMode || 'simulation';
 
         const request = {
           task_info: {
