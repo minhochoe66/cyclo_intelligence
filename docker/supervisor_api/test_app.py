@@ -59,17 +59,16 @@ def _container_with_mounts(*destinations):
 
 
 def test_missing_required_mounts_reports_stale_groot_container():
-    container = _container_with_mounts("/workspace")
+    container = _container_with_mounts("/legacy_model_mount/groot")
 
     assert _missing_required_mounts("groot", container) == [
-        "/policy_checkpoints/groot"
+        "/workspace"
     ]
 
 
 def test_missing_required_mounts_accepts_current_groot_container():
     container = _container_with_mounts(
         "/workspace",
-        "/policy_checkpoints/groot",
     )
 
     assert _missing_required_mounts("groot", container) == []

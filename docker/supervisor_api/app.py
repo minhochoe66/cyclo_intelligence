@@ -194,8 +194,8 @@ _BACKENDS: Dict[str, Dict[str, str]] = {
 }
 
 _REQUIRED_BACKEND_MOUNTS: Dict[str, tuple[str, ...]] = {
-    "lerobot": ("/policy_checkpoints/lerobot",),
-    "groot": ("/policy_checkpoints/groot",),
+    "lerobot": ("/workspace",),
+    "groot": ("/workspace",),
 }
 
 

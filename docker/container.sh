@@ -58,18 +58,27 @@ set -- "${NEW_ARGS[@]}"
 
 # Pre-create host bind-mount targets so docker doesn't auto-create them
 # as root-owned directories (which then can't be written to from the
-# host without sudo). Include the user-facing default browser locations
-# used by Cyclo Data and Cyclo Brain.
+# host without sudo). Default the heavy data mounts to SSD-backed storage;
+# override CYCLO_WORKSPACE_DIR / CYCLO_HUGGINGFACE_DIR when a different
+# host path is desired.
 ensure_host_dir() {
     [ -d "$1" ] || mkdir -p "$1"
 }
 
-ensure_host_dir "${SCRIPT_DIR}/workspace"
-ensure_host_dir "${SCRIPT_DIR}/workspace/rosbag2"
-ensure_host_dir "${SCRIPT_DIR}/workspace/lerobot"
-ensure_host_dir "${SCRIPT_DIR}/huggingface"
-ensure_host_dir "${SCRIPT_DIR}/../cyclo_brain/policy/lerobot/checkpoints"
-ensure_host_dir "${SCRIPT_DIR}/../cyclo_brain/policy/groot/checkpoints"
+CYCLO_SSD_ROOT="${CYCLO_SSD_ROOT:-/mnt/ssd/cyclo_intelligence}"
+CYCLO_WORKSPACE_DIR="${CYCLO_WORKSPACE_DIR:-${CYCLO_SSD_ROOT}/workspace}"
+CYCLO_HUGGINGFACE_DIR="${CYCLO_HUGGINGFACE_DIR:-${CYCLO_SSD_ROOT}/huggingface}"
+export CYCLO_WORKSPACE_DIR
+export CYCLO_HUGGINGFACE_DIR
+
+ensure_host_dir "${CYCLO_WORKSPACE_DIR}"
+ensure_host_dir "${CYCLO_WORKSPACE_DIR}/dataset"
+ensure_host_dir "${CYCLO_WORKSPACE_DIR}/rosbag2"
+ensure_host_dir "${CYCLO_WORKSPACE_DIR}/lerobot"
+ensure_host_dir "${CYCLO_WORKSPACE_DIR}/model"
+ensure_host_dir "${CYCLO_WORKSPACE_DIR}/model/lerobot"
+ensure_host_dir "${CYCLO_WORKSPACE_DIR}/model/groot"
+ensure_host_dir "${CYCLO_HUGGINGFACE_DIR}"
 CYCLO_AGENT_SOCKETS_DIR="${CYCLO_AGENT_SOCKETS_DIR:-/var/run/robotis/agent_sockets/cyclo_intelligence}"
 export CYCLO_AGENT_SOCKETS_DIR
 mkdir -p "$CYCLO_AGENT_SOCKETS_DIR" 2>/dev/null \
