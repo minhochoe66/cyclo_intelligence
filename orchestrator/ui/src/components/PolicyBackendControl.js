@@ -11,7 +11,11 @@ import clsx from 'clsx';
 import toast from 'react-hot-toast';
 import { MdPowerSettingsNew, MdRefresh, MdStop } from 'react-icons/md';
 import Tooltip from './Tooltip';
-import { getPolicyBackendReadiness } from '../hooks/usePolicyBackendStatus';
+import {
+  getPolicyBackendReadiness,
+  getPolicyBackendServiceLabel,
+  getPolicyBackendServices,
+} from '../hooks/usePolicyBackendStatus';
 
 const API_BASE = '/api';
 
@@ -20,11 +24,6 @@ const stateLabels = {
   exited: 'Stopped',
   not_created: 'Not created',
   unknown: 'Unknown',
-};
-
-const processLabels = {
-  'main-runtime': 'Main',
-  'engine-process': 'Engine',
 };
 
 const getBackendLabel = (serviceType) => {
@@ -111,13 +110,10 @@ export default function PolicyBackendControl({ serviceType }) {
   const statusLabel = isWarming
     ? 'Warming up'
     : stateLabels[state] || stateLabels.unknown;
-  const serviceByName = useMemo(() => {
-    const byName = {};
-    for (const service of status?.services || []) {
-      byName[service.name] = service;
-    }
-    return byName;
-  }, [status]);
+  const serviceRows = useMemo(
+    () => getPolicyBackendServices(status),
+    [status]
+  );
 
   const statusClass = clsx(
     'text-xs',
@@ -220,8 +216,7 @@ export default function PolicyBackendControl({ serviceType }) {
       {isRunning && (
         <>
           <div className="mt-2 grid grid-cols-2 gap-2">
-            {['main-runtime', 'engine-process'].map((name) => {
-              const service = serviceByName[name] || { state: 'unknown', raw: 'not reported' };
+            {serviceRows.map((service) => {
               const displayState = service.state === 'up'
                 ? 'Up'
                 : service.state === 'down'
@@ -229,13 +224,13 @@ export default function PolicyBackendControl({ serviceType }) {
                   : 'Unknown';
               return (
                 <Tooltip
-                  key={name}
+                  key={service.name}
                   position="bottom"
                   content={service.raw || displayState}
                 >
                   <div className="flex items-center justify-between gap-2 rounded-md bg-gray-50 px-2 py-1">
                     <span className="text-xs font-medium text-gray-600">
-                      {processLabels[name]}
+                      {getPolicyBackendServiceLabel(service.name)}
                     </span>
                     <span className={serviceStatusClass(service.state)}>
                       {displayState}

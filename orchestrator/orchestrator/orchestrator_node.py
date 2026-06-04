@@ -67,6 +67,9 @@ from cyclo_data.recorder.replay_handler import ReplayDataHandler
 from orchestrator.internal.communication.container_service_client import (
     ContainerServiceClient,
 )
+from orchestrator.internal.communication.inference_mode import (
+    publish_to_robot_from_task_info,
+)
 from orchestrator.timer.timer_manager import TimerManager
 from orchestrator.training.zenoh_training_manager import ZenohTrainingManager
 from orchestrator.internal.file_browser.file_browse_utils import FileBrowseUtils
@@ -1202,6 +1205,7 @@ class OrchestratorNode(Node):
                     if task_info.task_instruction
                     else ''
                 )
+                publish_to_robot = publish_to_robot_from_task_info(task_info)
                 service_prefix = self._determine_service_prefix(task_info)
 
                 # If the requested policy is already loaded on this
@@ -1242,6 +1246,7 @@ class OrchestratorNode(Node):
                         resume_result = existing_client.inference_command(
                             ContainerServiceClient.CMD_RESUME,
                             task_instruction=task_instruction,
+                            publish_to_robot=publish_to_robot,
                         )
                         if resume_result.success:
                             self._set_session_active(
@@ -1317,6 +1322,7 @@ class OrchestratorNode(Node):
                                 embodiment_tag='new_embodiment',
                                 robot_type=robot_type,
                                 task_instruction=task_instruction,
+                                publish_to_robot=publish_to_robot,
                             )
                             if not load_result.success:
                                 self.get_logger().error(
@@ -1335,6 +1341,7 @@ class OrchestratorNode(Node):
 
                             start_result = client.inference_command(
                                 ContainerServiceClient.CMD_START,
+                                publish_to_robot=publish_to_robot,
                             )
                             if not start_result.success:
                                 self.get_logger().error(
@@ -1376,7 +1383,8 @@ class OrchestratorNode(Node):
 
                     response.success = True
                     response.message = (
-                        f'{service_prefix.strip("/").upper()} inference loading'
+                        f'{service_prefix.strip("/").upper()} inference loading '
+                        f'({"robot" if publish_to_robot else "simulation"} mode)'
                     )
 
             elif request.command == SendCommand.Request.CONVERT_MP4:
@@ -1609,9 +1617,13 @@ class OrchestratorNode(Node):
                                 if request.task_info.task_instruction
                                 else ''
                             )
+                            publish_to_robot = publish_to_robot_from_task_info(
+                                request.task_info
+                            )
                             result = client.inference_command(
                                 ContainerServiceClient.CMD_RESUME,
                                 task_instruction=task_instruction,
+                                publish_to_robot=publish_to_robot,
                             )
                             if result.success:
                                 self.on_inference = True

@@ -157,6 +157,7 @@ class SendCommand(BaseAction):
             inference_hz=params.get('inference_hz', 15),
             control_hz=params.get('control_hz', 100),
             chunk_align_window_s=params.get('chunk_align_window_s', 0.3),
+            inference_mode=params.get('inference_mode', 'simulation'),
         )
         action.name = name
         return action
@@ -176,6 +177,7 @@ class SendCommand(BaseAction):
         inference_hz: int = 15,
         control_hz: int = 100,
         chunk_align_window_s: float = 0.3,
+        inference_mode: str = 'simulation',
         service_name: str = '/task/command',
     ):
         super().__init__(node, name='SendCommand')
@@ -188,6 +190,7 @@ class SendCommand(BaseAction):
         self.chunk_align_window_s = (
             float(chunk_align_window_s) if chunk_align_window_s else 0.0
         )
+        self.inference_mode = (inference_mode or 'simulation').strip().lower()
 
         self._client = self.node.create_client(SendCommandSrv, service_name)
 
@@ -347,6 +350,9 @@ class SendCommand(BaseAction):
         ti.task_type = 'inference'
         ti.policy_path = self.policy_path
         ti.service_type = _service_type_from_model(self.model)
+        if hasattr(ti, 'inference_mode'):
+            ti.inference_mode = self.inference_mode
+        ti.tags = [f'inference_mode:{self.inference_mode}']
         if self.control_hz:
             ti.control_hz = self.control_hz
         if self.inference_hz:

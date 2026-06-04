@@ -46,6 +46,7 @@ finally:
 _missing_required_mounts = app._missing_required_mounts
 _mount_source_for_destination = app._mount_source_for_destination
 _require_known_service = app._require_known_service
+_USER_SERVICES = app._USER_SERVICES
 
 
 def _container_with_mounts(*destinations):
@@ -97,3 +98,7 @@ def test_unknown_user_service_is_rejected():
         assert exc.status_code == 404
     else:
         raise AssertionError("unknown service should be rejected")
+
+
+def test_zenoh_router_is_user_managed_service():
+    assert "zenoh_router" in _USER_SERVICES

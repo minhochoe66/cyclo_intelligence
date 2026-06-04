@@ -329,6 +329,7 @@ class ContainerServiceClient:
         embodiment_tag: str = "",
         robot_type: str = "",
         task_instruction: str = "",
+        publish_to_robot: bool = False,
         timeout_sec: Optional[float] = None,
     ) -> ServiceResponse:
         """Call /{prefix}/inference_command (InferenceCommand.srv).
@@ -336,7 +337,9 @@ class ContainerServiceClient:
         Use the ``CMD_*`` class constants for ``command``. Only LOAD needs
         the model/embodiment/robot_type fields; pass empty strings for the
         other commands. ``task_instruction`` is used by LOAD (training-time
-        conditioning) and RESUME (online re-conditioning).
+        conditioning) and RESUME (online re-conditioning). ``publish_to_robot``
+        gates the policy container's robot command publishers; false is
+        simulation / 3D preview only.
 
         Timeout defaults to 600 s for LOAD (CUDA init + weight load) and
         10 s for everything else; override via ``timeout_sec``.
@@ -347,6 +350,8 @@ class ContainerServiceClient:
         request.embodiment_tag = embodiment_tag
         request.robot_type = robot_type
         request.task_instruction = task_instruction
+        if hasattr(request, "publish_to_robot"):
+            request.publish_to_robot = bool(publish_to_robot)
 
         if timeout_sec is None:
             timeout_sec = 600.0 if command == self.CMD_LOAD else 10.0

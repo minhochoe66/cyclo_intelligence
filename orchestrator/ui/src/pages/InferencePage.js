@@ -18,7 +18,13 @@ import React, { useState, useEffect } from 'react';
 import { useSelector, useDispatch } from 'react-redux';
 import clsx from 'clsx';
 import toast, { useToasterStore } from 'react-hot-toast';
-import { MdKeyboardDoubleArrowLeft, MdKeyboardDoubleArrowRight, MdViewInAr } from 'react-icons/md';
+import {
+  MdKeyboardDoubleArrowLeft,
+  MdKeyboardDoubleArrowRight,
+  MdViewInAr,
+  MdWarningAmber,
+  MdPrecisionManufacturing,
+} from 'react-icons/md';
 import InferenceControlPanel from '../components/InferenceControlPanel';
 import HeartbeatStatus from '../components/HeartbeatStatus';
 import InlineSystemStatus from '../components/InlineSystemStatus';
@@ -27,7 +33,9 @@ import RobotViewer3D from '../components/RobotViewer3D';
 import InferencePanel from '../components/InferencePanel';
 import RecordTopicMonitor from '../components/RecordTopicMonitor';
 import { setIsFirstLoadFalse } from '../features/ui/uiSlice';
+import { setInferenceMode } from '../features/tasks/taskSlice';
 import { useRosServiceCaller } from '../hooks/useRosServiceCaller';
+import { InferencePhase } from '../constants/taskPhases';
 
 export default function InferencePage({ isActive = true }) {
   const dispatch = useDispatch();
@@ -39,6 +47,8 @@ export default function InferencePage({ isActive = true }) {
 
   const robotType = useSelector((state) => state.tasks.robotType);
   const joystickMode = useSelector((state) => state.tasks.joystickMode);
+  const taskInfo = useSelector((state) => state.tasks.taskInfo);
+  const inferenceStatus = useSelector((state) => state.tasks.inferenceStatus);
 
   const [isRightPanelCollapsed, setIsRightPanelCollapsed] = useState(false);
   const [show3DViewer, setShow3DViewer] = useState(true);
@@ -62,6 +72,31 @@ export default function InferencePage({ isActive = true }) {
       sendRecordCommand('refresh_topics').catch(() => {});
     }
   }, [isActive, sendRecordCommand]);
+
+  const inferenceMode = taskInfo.inferenceMode || 'simulation';
+  const isRobotMode = inferenceMode === 'robot';
+  const isModeSwitchLocked =
+    inferenceStatus.inferencePhase === InferencePhase.LOADING;
+  const isModelActive = [
+    InferencePhase.INFERENCING,
+    InferencePhase.PAUSED,
+  ].includes(inferenceStatus.inferencePhase);
+
+  const handleInferenceModeChange = async (mode) => {
+    if (mode === inferenceMode || isModeSwitchLocked) return;
+    if (isModelActive) {
+      const result = await sendRecordCommand('finish').catch((error) => {
+        toast.error(`Mode switch reset failed: ${error.message || error}`);
+        return null;
+      });
+      if (!result || result.success === false) {
+        toast.error(result?.message || 'Inference reset failed');
+        return;
+      }
+      toast('Inference reset before mode switch');
+    }
+    dispatch(setInferenceMode(mode));
+  };
 
   const classMainContainer = 'h-full flex flex-col overflow-hidden';
   const classContentsArea = 'flex-1 flex min-h-0 pt-0 px-0 justify-center items-start';
@@ -157,6 +192,20 @@ export default function InferencePage({ isActive = true }) {
 
   const classHeartbeatStatus = clsx('absolute', 'top-[4.5rem]', 'left-5', 'z-10');
 
+  const modeButtonClass = (active, danger = false) => clsx(
+    'h-9 min-w-[8.5rem] px-3 rounded-md flex items-center justify-center gap-1.5',
+    'text-sm font-semibold transition-colors focus:outline-none focus:ring-2',
+    active
+      ? danger
+        ? 'bg-orange-500 text-white focus:ring-orange-300'
+        : 'bg-emerald-500 text-white focus:ring-emerald-300'
+      : 'bg-gray-100 text-gray-600 hover:bg-gray-200 focus:ring-gray-300',
+    {
+      'opacity-50 cursor-not-allowed': isModeSwitchLocked,
+      'cursor-pointer': !isModeSwitchLocked,
+    }
+  );
+
   return (
     <div className={classMainContainer}>
       <div className={classContentsArea}>
@@ -177,6 +226,41 @@ export default function InferencePage({ isActive = true }) {
               )}
               <InlineSystemStatus />
               <div className="flex-grow" />
+              <div className="flex items-center gap-2 bg-white/90 backdrop-blur-sm rounded-lg px-2 py-1 shadow-md border border-gray-100">
+                <div className="flex overflow-hidden rounded-md gap-1">
+                  <button
+                    type="button"
+                    onClick={() => handleInferenceModeChange('simulation')}
+                    disabled={isModeSwitchLocked}
+                    className={modeButtonClass(!isRobotMode)}
+                    aria-label="Use 3D simulation mode"
+                    title="3D simulation mode"
+                  >
+                    <MdViewInAr size={18} />
+                    3D Simulation
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => handleInferenceModeChange('robot')}
+                    disabled={isModeSwitchLocked}
+                    className={modeButtonClass(isRobotMode, true)}
+                    aria-label="Use robot mode"
+                    title="Robot mode"
+                  >
+                    <MdPrecisionManufacturing size={18} />
+                    Robot
+                  </button>
+                </div>
+                <div className={clsx(
+                  'h-9 px-2 rounded-md flex items-center gap-1.5 text-xs font-semibold whitespace-nowrap',
+                  isRobotMode
+                    ? 'bg-orange-50 text-orange-700 border border-orange-200'
+                    : 'bg-emerald-50 text-emerald-700 border border-emerald-200'
+                )}>
+                  {isRobotMode ? <MdWarningAmber size={16} /> : <MdViewInAr size={16} />}
+                  {isRobotMode ? 'Robot commands enabled' : 'Robot commands blocked'}
+                </div>
+              </div>
               <InferenceControlPanel />
             </div>
             <div className={classHeartbeatStatus}>
@@ -187,7 +271,11 @@ export default function InferencePage({ isActive = true }) {
           <div className="flex-[4] min-h-[120px] flex flex-row items-center justify-center mx-1 gap-2 h-full relative">
             {show3DViewer && (
               <div className="h-[85%] rounded-2xl overflow-hidden relative" style={{ aspectRatio: '4/3' }}>
-                <RobotViewer3D mode="live" showSourceSelector />
+                <RobotViewer3D
+                  mode="live"
+                  showSourceSelector
+                  defaultVisualizationSource={isRobotMode ? 'state' : 'action'}
+                />
               </div>
             )}
             <div className="h-[85%]" style={{ aspectRatio: '4/3' }}>

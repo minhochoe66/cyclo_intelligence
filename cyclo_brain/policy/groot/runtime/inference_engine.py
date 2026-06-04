@@ -50,6 +50,7 @@ import gr00t.model  # noqa: F401 - register custom models
 from gr00t.data.embodiment_tags import EmbodimentTag  # noqa: E402
 from gr00t.policy.gr00t_policy import Gr00tPolicy  # noqa: E402
 from robot_client import RobotClient  # noqa: E402
+from robot_client.camera_mapping import resolve_camera_feature_sources  # noqa: E402
 
 
 def _env_flag(name: str, default: bool = False) -> bool:
@@ -323,11 +324,10 @@ class GR00TInference:
         cam_config = self.robot._config.get("cameras", {})
         available_cameras = set(self.robot.camera_names)
 
-        camera_sources = {}
-        for policy_key in self.policy_info["video"]:
-            source_key = self._resolve_camera_source(policy_key, available_cameras)
-            if source_key:
-                camera_sources[policy_key] = source_key
+        camera_sources = resolve_camera_feature_sources(
+            self.policy_info["video"],
+            available_cameras,
+        )
 
         self.robot_info["cameras"] = list(camera_sources.keys())
         self.robot_info["camera_sources"] = camera_sources
@@ -359,35 +359,6 @@ class GR00TInference:
         self.robot_info["sensor_states"] = sensor_states
 
         self.logger.info("Robot info: %s", self.robot_info)
-
-    def _resolve_camera_source(self, policy_key: str, available_cameras: set) -> Optional[str]:
-        if policy_key in available_cameras:
-            return policy_key
-
-        explicit_aliases = {
-            "cam_left_head": "cam_head_left",
-            "cam_right_head": "cam_head_right",
-            "cam_left_wrist": "cam_wrist_left",
-            "cam_right_wrist": "cam_wrist_right",
-        }
-        alias = explicit_aliases.get(policy_key)
-        if alias in available_cameras:
-            self.logger.info("Camera alias: %s <- %s", policy_key, alias)
-            return alias
-
-        parts = policy_key.split("_")
-        if len(parts) == 3 and parts[0] == "cam":
-            swapped = "_".join((parts[0], parts[2], parts[1]))
-            if swapped in available_cameras:
-                self.logger.info("Camera alias: %s <- %s", policy_key, swapped)
-                return swapped
-
-        self.logger.warning(
-            "No robot camera source matched policy camera key %s; available=%s",
-            policy_key,
-            sorted(available_cameras),
-        )
-        return None
 
     def get_action_chunk(self, request) -> dict:
         """Build observation from RobotClient, run inference, return action chunk."""
@@ -498,3 +469,8 @@ class GR00TInference:
     @staticmethod
     def fail(message: str) -> dict:
         return {"success": False, "message": message}
+
+
+def create_engine() -> GR00TInference:
+    """Factory used by the shared Engine process."""
+    return GR00TInference()

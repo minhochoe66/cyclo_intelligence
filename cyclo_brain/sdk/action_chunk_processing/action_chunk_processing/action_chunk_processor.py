@@ -101,7 +101,7 @@ class ActionChunkProcessor:
         with self._lock:
             if self._buffer:
                 return self._buffer.popleft()
-            return None if self._last_action is None else self._last_action.copy()
+            return None
 
     def clear(self) -> None:
         with self._lock:

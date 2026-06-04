@@ -101,6 +101,9 @@ services:
       # supervisor_api manages lerobot / groot lifecycle via Docker SDK
       # (PLAN §4.8). Socket mount makes that possible without DinD.
       - /var/run/docker.sock:/var/run/docker.sock
+      # Live-edit supervisor_api so lifecycle logic stays in sync with this
+      # compose file without rebuilding the full cyclo image.
+      - ./supervisor_api:/opt/supervisor_api:ro
       # s6-agent UDS — cyclo_manager FastAPI listens here for
       # system-wide control requests from the host side.
       - ${CYCLO_AGENT_SOCKETS_DIR:-/var/run/robotis/agent_sockets/cyclo_intelligence}:/var/run/agent
@@ -245,8 +248,7 @@ services:
 
   # ============================================================
   # GR00T N1.7 two-process policy container.
-  # Uses GR00T's backend-local s6-overlay layout
-  # (inference-server + control-publisher).
+  # Mirrors lerobot's s6-overlay layout (main-runtime + engine-process).
   # Pulled / started on demand by the UI
   # via supervisor_api (PLAN §4.8).
   # ============================================================
@@ -317,8 +319,8 @@ services:
       - ../cyclo_brain/policy/common/runtime:/policy_runtime:ro
       # GR00T keeps backend-local app services, while preserving the image's
       # s6-overlay built-in bundles.
-      - ../cyclo_brain/policy/groot/s6-services/inference-server:/etc/s6-overlay/s6-rc.d/inference-server:ro
-      - ../cyclo_brain/policy/groot/s6-services/control-publisher:/etc/s6-overlay/s6-rc.d/control-publisher:ro
+      - ../cyclo_brain/policy/groot/s6-services/main-runtime:/etc/s6-overlay/s6-rc.d/main-runtime:ro
+      - ../cyclo_brain/policy/groot/s6-services/engine-process:/etc/s6-overlay/s6-rc.d/engine-process:ro
       - ../cyclo_brain/policy/groot/s6-services/user/contents.d:/etc/s6-overlay/s6-rc.d/user/contents.d:ro
       # Live-edit GR00T engine code.
       - ../cyclo_brain/policy/groot/groot_engine:/app/groot_engine:ro
@@ -345,7 +347,7 @@ services:
       test:
         [
           "CMD-SHELL",
-          "S6_SVSTAT=$$(ls /package/admin/s6-*/command/s6-svstat 2>/dev/null | head -1); [ -n \"$$S6_SVSTAT\" ] && \"$$S6_SVSTAT\" /run/service/inference-server | grep -q '^up ' && \"$$S6_SVSTAT\" /run/service/control-publisher | grep -q '^up '",
+          "S6_SVSTAT=$$(ls /package/admin/s6-*/command/s6-svstat 2>/dev/null | head -1); [ -n \"$$S6_SVSTAT\" ] && \"$$S6_SVSTAT\" /run/service/main-runtime | grep -q '^up ' && \"$$S6_SVSTAT\" /run/service/engine-process | grep -q '^up '",
         ]
       interval: 30s
       timeout: 10s

@@ -51,6 +51,7 @@ const ENUM_PARAMS = {
     'groot',
     'lerobot',
   ],
+  inference_mode: ['simulation', 'robot'],
 };
 
 // SendCommand inputs that are meaningful per command. Anything outside
@@ -60,11 +61,11 @@ const ENUM_PARAMS = {
 const SEND_COMMAND_ACTIVE_FIELDS = {
   LOAD: new Set([
     'command', 'model', 'policy_path', 'task_instruction',
-    'inference_hz', 'control_hz', 'chunk_align_window_s',
+    'inference_mode', 'inference_hz', 'control_hz', 'chunk_align_window_s',
   ]),
   // Resume re-conditions language mid-run; the other LOAD inputs are
   // already baked into the loaded policy.
-  RESUME: new Set(['command', 'task_instruction']),
+  RESUME: new Set(['command', 'task_instruction', 'inference_mode']),
   STOP: new Set(['command']),
   CLEAR: new Set(['command']),
 };

@@ -238,6 +238,7 @@ export function useRosServiceCaller() {
           (k) => Number(cameraRotations[k] || 0),
         );
         const imageResize = options.imageResize || null;
+        const inferenceMode = taskInfo.inferenceMode || 'simulation';
 
         const request = {
           task_info: {
@@ -248,7 +249,7 @@ export function useRosServiceCaller() {
             subtask_instruction: subtaskInstruction,
             policy_path: String(taskInfo.policyPath || ''),
             record_inference_mode: Boolean(taskInfo.recordInferenceMode),
-            tags: [],
+            tags: [`inference_mode:${inferenceMode}`],
             control_hz: Number(taskInfo.controlHz || 100),
             inference_hz: Number(taskInfo.inferenceHz || 15),
             chunk_align_window_s: Number(
@@ -258,6 +259,7 @@ export function useRosServiceCaller() {
             ),
             include_robotis_license: Boolean(taskInfo.includeRobotisLicense),
             service_type: String(taskInfo.serviceType || ''),
+            inference_mode: String(inferenceMode),
           },
           command: Number(command_enum),
           segment_index: Number(options.segmentIndex || 0),

@@ -63,6 +63,7 @@ logger = logging.getLogger("supervisor_api")
 # Names the UI may start/stop. Kept explicit so a stray POST can't
 # poke at s6-agent or the log pipelines.
 _USER_SERVICES: tuple[str, ...] = (
+    "zenoh_router",
     "orchestrator",
     "cyclo_data",
     "bt_node",
@@ -196,7 +197,7 @@ _BACKENDS: Dict[str, Dict[str, str]] = {
         "service": "groot",
         "container": "groot_server",
         "image": f"robotis/groot-zenoh:1.2.1-{_BACKEND_ARCH}",
-        "services": ["inference-server", "control-publisher"],
+        "services": ["main-runtime", "engine-process"],
     },
 }
 
