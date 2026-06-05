@@ -27,6 +27,9 @@ def resolve_camera_feature_sources(
 
     Legacy swapped names like ``cam_head_left`` are accepted as aliases for
     ``cam_left_head`` so older checkpoints still run on canonical robot YAMLs.
+    Older single-head checkpoints may also use ``cam_head``; Cyclo maps that
+    to the left head stream, which is the historical default monocular head
+    camera.
     """
     model_keys = _unique(model_camera_keys)
     camera_names = _unique(robot_camera_names)
@@ -98,6 +101,9 @@ def camera_key_aliases(key: str) -> set[str]:
     aliases = {key, body, suffix}
 
     semantic_names = {suffix}
+    if suffix == "cam_head":
+        semantic_names.add("cam_left_head")
+
     match = _CAMERA_SEMANTIC_RE.match(suffix)
     if match:
         first = match.group("a")
