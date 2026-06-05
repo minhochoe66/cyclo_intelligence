@@ -56,6 +56,8 @@ ENV DEBIAN_FRONTEND=noninteractive
 # System dependencies:
 #   nginx          — serves the UI + proxies /api/* to supervisor_api / rosbridge
 #   docker.io      — supervisor_api manages lerobot / groot containers on-demand
+#   docker-compose-v2
+#                  — recreates missing policy containers from compose
 #                    (PLAN §4.8); needs /var/run/docker.sock mount at runtime
 #   rmw-zenoh-cpp  — ROS2 ↔ policy-container IPC
 #   ffmpeg / xz    — MCAP→MP4 conversion pipeline (cyclo_data) + s6 overlay
@@ -66,6 +68,7 @@ RUN apt-get update && apt-get install -y \
     nano \
     nginx \
     docker.io \
+    docker-compose-v2 \
     python3-pip \
     ros-${ROS_DISTRO}-rmw-zenoh-cpp \
     ros-${ROS_DISTRO}-rosbridge-server \

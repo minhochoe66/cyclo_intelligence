@@ -102,3 +102,40 @@ def test_unknown_user_service_is_rejected():
 
 def test_zenoh_router_is_user_managed_service():
     assert "zenoh_router" in _USER_SERVICES
+
+
+def test_host_project_dir_falls_back_to_compose_container_name(monkeypatch):
+    class FakeContainers:
+        def __init__(self):
+            self.requested = []
+
+        def get(self, name):
+            self.requested.append(name)
+            if name == "cyclo_intelligence":
+                return SimpleNamespace(
+                    attrs={
+                        "Mounts": [
+                            {
+                                "Destination": app._CYCLO_REPO_MOUNT,
+                                "Source": "/home/rc/workspace/cyclo_intelligence",
+                            }
+                        ]
+                    }
+                )
+            raise NotFound(name)
+
+    fake_containers = FakeContainers()
+    fake_client = SimpleNamespace(containers=fake_containers)
+
+    monkeypatch.setenv("HOSTNAME", "ubuntu")
+    monkeypatch.setattr(app, "_docker_client", lambda: fake_client)
+    app._HOST_PROJECT_DIR_CACHE = None
+
+    try:
+        assert (
+            app._host_project_dir()
+            == "/home/rc/workspace/cyclo_intelligence/docker"
+        )
+        assert fake_containers.requested == ["ubuntu", "cyclo_intelligence"]
+    finally:
+        app._HOST_PROJECT_DIR_CACHE = None

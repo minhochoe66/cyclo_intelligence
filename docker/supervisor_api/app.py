@@ -36,6 +36,10 @@ Environment overrides:
                                       (default /root/ros2_ws/src/cyclo_intelligence)
     CYCLO_SUPERVISOR_API_COMPOSE_FILE absolute path to docker-compose.yml inside
                                       this container (default <repo-mount>/docker/docker-compose.yml)
+    CYCLO_SUPERVISOR_API_CONTAINER_NAME
+                                      Docker container name to inspect for
+                                      host-side bind mount paths
+                                      (default cyclo_intelligence fallback)
 """
 
 from __future__ import annotations
@@ -231,6 +235,19 @@ def _mount_source_for_destination(mounts, destination: str) -> Optional[str]:
     return None
 
 
+def _self_container_candidates() -> List[str]:
+    candidates = [
+        os.environ.get("CYCLO_SUPERVISOR_API_CONTAINER_NAME"),
+        os.environ.get("HOSTNAME"),
+        "cyclo_intelligence",
+    ]
+    seen: List[str] = []
+    for candidate in candidates:
+        if candidate and candidate not in seen:
+            seen.append(candidate)
+    return seen
+
+
 def _host_project_dir() -> Optional[str]:
     """Resolve the host-side path to cyclo_intelligence/docker/ by
     inspecting our own container's mounts.
@@ -245,21 +262,26 @@ def _host_project_dir() -> Optional[str]:
     global _HOST_PROJECT_DIR_CACHE
     if _HOST_PROJECT_DIR_CACHE is not None:
         return _HOST_PROJECT_DIR_CACHE
-    own_id = os.environ.get("HOSTNAME")
-    if not own_id:
-        return None
     try:
-        ctr = _docker_client().containers.get(own_id)
+        client = _docker_client()
     except DockerException as e:
-        logger.warning("self-inspect failed: %s", e)
+        logger.warning("docker init failed during self-inspect: %s", e)
         return None
-    host_repo = _mount_source_for_destination(
-        ctr.attrs.get("Mounts", []),
-        _CYCLO_REPO_MOUNT,
-    )
-    if host_repo:
-        _HOST_PROJECT_DIR_CACHE = os.path.join(host_repo, "docker")
-        return _HOST_PROJECT_DIR_CACHE
+    for own_id in _self_container_candidates():
+        try:
+            ctr = client.containers.get(own_id)
+        except NotFound:
+            continue
+        except DockerException as e:
+            logger.warning("self-inspect failed for %s: %s", own_id, e)
+            continue
+        host_repo = _mount_source_for_destination(
+            ctr.attrs.get("Mounts", []),
+            _CYCLO_REPO_MOUNT,
+        )
+        if host_repo:
+            _HOST_PROJECT_DIR_CACHE = os.path.join(host_repo, "docker")
+            return _HOST_PROJECT_DIR_CACHE
     logger.warning(
         "no mount found for %s — compose CLI relative paths will resolve "
         "against the in-container path, which the host docker daemon "
@@ -334,20 +356,6 @@ def _container_raw_state(container) -> str:
     except DockerException:
         pass
     return container.attrs.get("State", {}).get("Status", "unknown")
-
-
-def _missing_required_mounts(name: str, container) -> List[str]:
-    required_mounts = _REQUIRED_BACKEND_MOUNTS.get(name, ())
-    if not required_mounts:
-        return []
-    mounted_destinations = {
-        mount.get("Destination")
-        for mount in container.attrs.get("Mounts", [])
-    }
-    return [
-        destination for destination in required_mounts
-        if destination not in mounted_destinations
-    ]
 
 
 def _missing_required_mounts(name: str, container) -> List[str]:
