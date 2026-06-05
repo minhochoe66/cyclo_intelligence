@@ -28,11 +28,13 @@ import {
   setHFRepoIdDownload,
 } from '../editDatasetSlice';
 import { useRosServiceCaller } from '../../../hooks/useRosServiceCaller';
+import useWorkspaceMount from '../../../hooks/useWorkspaceMount';
 import FileBrowserModal from '../../../components/FileBrowserModal';
 import TokenInputPopup from '../../../components/TokenInputPopup';
 import SectionSelector from './SectionSelector';
 import { DEFAULT_PATHS, HF_ENDPOINT_PRESETS } from '../../../constants/paths';
 import HFStatus from '../../../constants/HFStatus';
+import { mapWorkspacePathToHost } from '../../../utils/workspacePath';
 import {
   DOWNLOAD_MODEL_BACKENDS,
   getDefaultDownloadPath,
@@ -98,6 +100,14 @@ const getDefaultUploadPath = (uploadType, modelBackend = 'lerobot') =>
   uploadType === 'model'
     ? getDefaultDownloadPath('model', modelBackend)
     : DEFAULT_PATHS.HF_DATASET_DOWNLOAD_PATH;
+
+const joinRepoPath = (baseDir, repoId) => {
+  const normalizedBase = (baseDir || '').trim().replace(/\/+$/, '');
+  const normalizedRepo = (repoId || '').trim().replace(/^\/+/, '');
+  if (!normalizedBase) return normalizedRepo;
+  if (!normalizedRepo) return normalizedBase;
+  return `${normalizedBase}/${normalizedRepo}`;
+};
 
 // Style Classes
 const STYLES = {
@@ -168,6 +178,7 @@ const HuggingfaceSection = () => {
     listHFEndpoints,
     selectHFEndpoint,
   } = useRosServiceCaller();
+  const workspaceMount = useWorkspaceMount();
 
   // Local states
   const [activeSection, setActiveSection] = useState(SECTION_NAME.UPLOAD);
@@ -179,23 +190,22 @@ const HuggingfaceSection = () => {
   // and the default destination path for download.
   const [uploadType, setUploadType] = useState('dataset');
   const [uploadModelBackend, setUploadModelBackend] = useState('lerobot');
-  const [downloadType, setDownloadType] = useState('model');
+  const [downloadType, setDownloadType] = useState('dataset');
   const [downloadModelBackend, setDownloadModelBackend] = useState('lerobot');
   // Destination directory for HF downloads. Model downloads land in the
   // selected model folder so Inference can browse them directly.
   const [hfLocalDirDownload, setHfLocalDirDownload] = useState(() =>
-    getDefaultDownloadPath('model', 'lerobot')
+    getDefaultDownloadPath('dataset')
   );
   // When the user toggles type, swap the destination to that type's
-  // canonical default — but only if the current value is a known default
-  // (i.e. they haven't typed something custom). Custom values stay put.
+  // canonical default when the current value belongs to one of our managed
+  // workspace roots. Custom values outside those roots stay put.
   useEffect(() => {
-    if (isManagedDownloadPath(hfLocalDirDownload)) {
-      setHfLocalDirDownload(getDefaultDownloadPath(downloadType, downloadModelBackend));
-    }
-    // hfLocalDirDownload intentionally omitted — we only react to type flips,
-    // backend flips, not to the user editing the field.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    setHfLocalDirDownload((currentDir) =>
+      !currentDir || isManagedDownloadPath(currentDir)
+        ? getDefaultDownloadPath(downloadType, downloadModelBackend)
+        : currentDir
+    );
   }, [downloadType, downloadModelBackend]);
 
   const [showHfDownloadDirBrowserModal, setShowHfDownloadDirBrowserModal] = useState(false);
@@ -232,12 +242,11 @@ const HuggingfaceSection = () => {
     isHfStatusReady;
 
   useEffect(() => {
-    if (!hfLocalDirUpload || isManagedDownloadPath(hfLocalDirUpload)) {
-      setHfLocalDirUpload(getDefaultUploadPath(uploadType, uploadModelBackend));
-    }
-    // hfLocalDirUpload intentionally omitted so custom user paths survive
-    // ordinary typing and only reset when they were a known default.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    setHfLocalDirUpload((currentDir) =>
+      !currentDir || isManagedDownloadPath(currentDir)
+        ? getDefaultUploadPath(uploadType, uploadModelBackend)
+        : currentDir
+    );
   }, [uploadType, uploadModelBackend]);
 
   const downloadButtonEnabled =
@@ -456,6 +465,14 @@ const HuggingfaceSection = () => {
     if (trimmed.includes('/')) return trimmed;
     return `${userId || ''}/${trimmed}`;
   };
+
+  const uploadContainerPath = joinRepoPath(hfLocalDirUpload, '');
+  const uploadHostPath = mapWorkspacePathToHost(uploadContainerPath, workspaceMount);
+  const downloadLandingPath = joinRepoPath(
+    hfLocalDirDownload,
+    resolveFullRepoId(hfRepoIdDownload) || '<repo-id>'
+  );
+  const downloadHostLandingPath = mapWorkspacePathToHost(downloadLandingPath, workspaceMount);
 
   // Validate just the repo name portion (after the slash) since `validateHfRepoName`
   // does not allow slashes.
@@ -913,6 +930,15 @@ const HuggingfaceSection = () => {
                       disabled={isDownloading}
                     />
                   </div>
+                  {uploadHostPath && (
+                    <div className="text-xs text-gray-500 flex items-center gap-1">
+                      <MdFolderOpen className="inline-block w-4 h-4 text-blue-700 mr-1" />
+                      Host path{' '}
+                      <span className="font-mono text-blue-700">
+                        {uploadHostPath}
+                      </span>
+                    </div>
+                  )}
                 </div>
 
                 {/* Repo ID Input */}
@@ -1194,10 +1220,18 @@ const HuggingfaceSection = () => {
                     <MdFolderOpen className="inline-block w-4 h-4 text-blue-700 mr-1" />
                     Repo will land at{' '}
                     <span className="font-mono text-blue-700">
-                      {(hfLocalDirDownload || '').replace(/\/$/, '')}/
-                      {resolveFullRepoId(hfRepoIdDownload) || '<repo-id>'}
+                      {downloadLandingPath}
                     </span>
                   </div>
+                  {downloadHostLandingPath && (
+                    <div className="text-xs text-gray-500 flex items-center gap-1">
+                      <MdFolderOpen className="inline-block w-4 h-4 text-blue-700 mr-1" />
+                      Host path{' '}
+                      <span className="font-mono text-blue-700">
+                        {downloadHostLandingPath}
+                      </span>
+                    </div>
+                  )}
                 </div>
 
                 {/* Download Button */}

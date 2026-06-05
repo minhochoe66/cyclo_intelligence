@@ -44,6 +44,7 @@ finally:
     sys.path = original_path
 
 _missing_required_mounts = app._missing_required_mounts
+_mount_source_for_destination = app._mount_source_for_destination
 _require_known_service = app._require_known_service
 
 
@@ -72,6 +73,17 @@ def test_missing_required_mounts_accepts_current_groot_container():
     )
 
     assert _missing_required_mounts("groot", container) == []
+
+
+def test_mount_source_for_destination_resolves_workspace_host_path():
+    mounts = [
+        {"Destination": "/root/ros2_ws/src/cyclo_intelligence", "Source": "/repo"},
+        {"Destination": "/workspace", "Source": "/mnt/ssd/cyclo_intelligence/workspace"},
+    ]
+
+    assert _mount_source_for_destination(mounts, "/workspace") == (
+        "/mnt/ssd/cyclo_intelligence/workspace"
+    )
 
 
 def test_bt_node_is_known_user_service():

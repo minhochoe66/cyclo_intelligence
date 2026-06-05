@@ -26,6 +26,17 @@ describe('hfDownloadPaths', () => {
       expect(isManagedDownloadPath(option.path)).toBe(true);
     }
     expect(isManagedDownloadPath(DEFAULT_PATHS.HF_DATASET_DOWNLOAD_PATH)).toBe(true);
+    expect(isManagedDownloadPath(DEFAULT_PATHS.ROSBAG2_PATH)).toBe(true);
+    expect(isManagedDownloadPath(`${DEFAULT_PATHS.HF_DATASET_DOWNLOAD_PATH}/task_a`)).toBe(
+      true
+    );
+    expect(isManagedDownloadPath(`${DEFAULT_PATHS.LEROBOT_CHECKPOINTS_PATH}/repo_a`)).toBe(
+      true
+    );
+    expect(isManagedDownloadPath(`${DEFAULT_PATHS.GROOT_CHECKPOINTS_PATH}/repo_a/`)).toBe(
+      true
+    );
+    expect(isManagedDownloadPath(' /workspace/model ')).toBe(true);
     expect(isManagedDownloadPath('/workspace/custom_models')).toBe(false);
   });
 });
