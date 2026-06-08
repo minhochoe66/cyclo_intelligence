@@ -254,7 +254,7 @@ services:
   # ============================================================
   groot:
     container_name: groot_server
-    image: robotis/groot-zenoh:1.2.1-${ARCH:-arm64}
+    image: robotis/groot-zenoh:1.3.0-${ARCH:-arm64}
     build:
       context: ../cyclo_brain/policy/groot
       dockerfile: Dockerfile.${ARCH:-arm64}
