@@ -184,6 +184,7 @@ class OrchestratorNode(Node):
         # LOAD / START / PAUSE / RESUME / STOP / UNLOAD from UI commands.
         self.container_service_client: Optional[ContainerServiceClient] = None
         self._loaded_inference_policy_path: str = ''
+        self._loaded_inference_publish_to_robot: bool = False
 
         # HF endpoint registry — orchestrator-owned because the
         # set/get/list/select_hf_endpoint services also read and mutate
@@ -1249,6 +1250,10 @@ class OrchestratorNode(Node):
                             publish_to_robot=publish_to_robot,
                         )
                         if resume_result.success:
+                            with self._state_lock:
+                                self._loaded_inference_publish_to_robot = (
+                                    publish_to_robot
+                                )
                             self._set_session_active(
                                 on_inference=True,
                                 start_time=time.perf_counter(),
@@ -1361,6 +1366,9 @@ class OrchestratorNode(Node):
                                 if self.container_service_client is client:
                                     self._loaded_inference_policy_path = (
                                         normalized_model_path
+                                    )
+                                    self._loaded_inference_publish_to_robot = (
+                                        publish_to_robot
                                     )
                             self._publish_inference_phase(InferenceStatus.INFERENCING)
                         except Exception as e:
@@ -1611,19 +1619,19 @@ class OrchestratorNode(Node):
                     elif request.command == SendCommand.Request.RESUME_INFERENCE:
                         with self._state_lock:
                             client = self.container_service_client
+                            loaded_publish_to_robot = (
+                                self._loaded_inference_publish_to_robot
+                            )
                         if client is not None:
                             task_instruction = (
                                 request.task_info.task_instruction[0]
                                 if request.task_info.task_instruction
                                 else ''
                             )
-                            publish_to_robot = publish_to_robot_from_task_info(
-                                request.task_info
-                            )
                             result = client.inference_command(
                                 ContainerServiceClient.CMD_RESUME,
                                 task_instruction=task_instruction,
-                                publish_to_robot=publish_to_robot,
+                                publish_to_robot=loaded_publish_to_robot,
                             )
                             if result.success:
                                 self.on_inference = True
@@ -2255,6 +2263,7 @@ class OrchestratorNode(Node):
             client = self.container_service_client
             self.container_service_client = None
             self._loaded_inference_policy_path = ''
+            self._loaded_inference_publish_to_robot = False
         if client is None:
             return
 

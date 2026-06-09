@@ -20,18 +20,23 @@ def normalize_inference_mode(value) -> str:
     return SIMULATION_MODE
 
 
-def publish_to_robot_from_task_info(task_info) -> bool:
-    """Return true only when a command explicitly asks for robot publish."""
+def inference_mode_from_task_info(task_info) -> str:
+    """Return robot/simulation from TaskInfo fields and tags."""
     mode = getattr(task_info, "inference_mode", "")
     if mode:
-        return normalize_inference_mode(mode) == ROBOT_MODE
+        return normalize_inference_mode(mode)
 
     tags = getattr(task_info, "tags", []) or []
     for tag in tags:
         normalized = str(tag or "").strip().lower()
         if normalized in {"inference_mode:robot", "publish_to_robot:true"}:
-            return True
+            return ROBOT_MODE
         if normalized in {"inference_mode:simulation", "publish_to_robot:false"}:
-            return False
+            return SIMULATION_MODE
 
-    return bool(getattr(task_info, "publish_to_robot", False))
+    return ROBOT_MODE if bool(getattr(task_info, "publish_to_robot", False)) else SIMULATION_MODE
+
+
+def publish_to_robot_from_task_info(task_info) -> bool:
+    """Return true only when a command explicitly asks for robot publish."""
+    return inference_mode_from_task_info(task_info) == ROBOT_MODE

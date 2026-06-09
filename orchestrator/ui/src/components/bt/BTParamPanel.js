@@ -63,9 +63,8 @@ const SEND_COMMAND_ACTIVE_FIELDS = {
     'command', 'model', 'policy_path', 'task_instruction',
     'inference_mode', 'inference_hz', 'control_hz', 'chunk_align_window_s',
   ]),
-  // Resume re-conditions language mid-run; the other LOAD inputs are
-  // already baked into the loaded policy.
-  RESUME: new Set(['command', 'task_instruction', 'inference_mode']),
+  // Resume can re-condition language mid-run; output mode is fixed by LOAD.
+  RESUME: new Set(['command', 'task_instruction']),
   STOP: new Set(['command']),
   CLEAR: new Set(['command']),
 };

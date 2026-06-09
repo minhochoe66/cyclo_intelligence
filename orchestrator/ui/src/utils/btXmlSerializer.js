@@ -26,7 +26,7 @@ const SEND_COMMAND_PARAMS_BY_COMMAND = {
     'control_hz',
     'chunk_align_window_s',
   ]),
-  RESUME: new Set(['command', 'task_instruction', 'inference_mode']),
+  RESUME: new Set(['command', 'task_instruction']),
   STOP: new Set(['command']),
   CLEAR: new Set(['command']),
 };
