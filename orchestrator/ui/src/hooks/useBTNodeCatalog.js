@@ -25,8 +25,6 @@ import {
 import { useRosServiceCaller } from './useRosServiceCaller';
 
 const API_BASE = '/api';
-const BT_NODE_START_TIMEOUT_MS = 8000;
-const BT_NODE_POLL_INTERVAL_MS = 500;
 
 // Fire-once-per-app guard. The slice's `source` field also tracks this,
 // but if a component mounts → fetch starts → component unmounts before
@@ -45,10 +43,6 @@ async function readJsonResponse(response) {
   }
 }
 
-function sleep(ms) {
-  return new Promise((resolve) => setTimeout(resolve, ms));
-}
-
 async function getBtNodeStatus() {
   const response = await fetch(`${API_BASE}/services/bt_node/status`);
   const data = await readJsonResponse(response);
@@ -58,37 +52,16 @@ async function getBtNodeStatus() {
   return data;
 }
 
-async function startBtNode() {
-  const response = await fetch(`${API_BASE}/services/bt_node/start`, {
-    method: 'POST',
-  });
-  const data = await readJsonResponse(response);
-  if (!response.ok || data.ok === false) {
-    throw new Error(data.detail || data.message || 'bt_node start failed');
-  }
-}
-
-async function ensureBtNodeRunning() {
-  let status;
+async function canFetchLiveCatalog() {
   try {
-    status = await getBtNodeStatus();
+    const status = await getBtNodeStatus();
+    return status.state === 'up';
   } catch {
-    // Supervisor API may be unavailable in test/dev setups. Let the ROS
-    // service call below decide whether the catalog can be fetched.
-    return;
+    // Supervisor API may be unavailable in test/dev setups. Let the ROS service
+    // call below decide whether the catalog can be fetched, but never start the
+    // BT node implicitly from this hook.
+    return true;
   }
-
-  if (status.state === 'up') return;
-
-  await startBtNode();
-  const deadline = Date.now() + BT_NODE_START_TIMEOUT_MS;
-  while (Date.now() < deadline) {
-    await sleep(BT_NODE_POLL_INTERVAL_MS);
-    status = await getBtNodeStatus();
-    if (status.state === 'up') return;
-  }
-
-  throw new Error('bt_node did not become ready in time');
 }
 
 /**
@@ -111,7 +84,13 @@ export function useBTNodeCatalog() {
 
     dispatch(catalogFetchStarted());
     try {
-      await ensureBtNodeRunning();
+      const canFetch = await canFetchLiveCatalog();
+      if (!canFetch) {
+        fetchStarted = false;
+        dispatch(catalogFetchFailed('BT node is stopped. Press BT Node ON to update the live node list.'));
+        return;
+      }
+
       const result = await getNodeCatalog();
       if (!result || !result.success) {
         const msg = (result && result.message) || 'Service returned failure';
@@ -137,27 +116,9 @@ export function useBTNodeCatalog() {
         schemaVersion: result.schema_version || '',
       }));
     } catch (err) {
-      try {
-        await startBtNode();
-        await sleep(BT_NODE_POLL_INTERVAL_MS);
-        const result = await getNodeCatalog();
-        if (result && result.success) {
-          const parsed = JSON.parse(result.catalog_json || '[]');
-          if (!Array.isArray(parsed)) {
-            throw new Error('Catalog JSON is not an array');
-          }
-          dispatch(catalogFetchSucceeded({
-            catalog: parsed,
-            schemaVersion: result.schema_version || '',
-          }));
-          return;
-        }
-        throw new Error((result && result.message) || 'Service returned failure');
-      } catch (retryErr) {
-        // Reset the guard so a later reconnect can try again.
-        fetchStarted = false;
-        dispatch(catalogFetchFailed(retryErr.message || err.message || String(err)));
-      }
+      // Reset the guard so a later manual BT Node ON can try again.
+      fetchStarted = false;
+      dispatch(catalogFetchFailed(err.message || String(err)));
     }
   }, [dispatch, getNodeCatalog]);
 
