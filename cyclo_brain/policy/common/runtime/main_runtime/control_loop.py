@@ -218,7 +218,10 @@ class ControlLoop:
                     except Exception as e:
                         logger.warning("failed to publish action preview: %s", e)
                 if publish_to_robot:
-                    robot.publish_action(action, action_keys)
+                    try:
+                        robot.publish_action(action, action_keys)
+                    except Exception as e:
+                        logger.error("failed to publish robot action: %s", e)
 
             refill_threshold = self._refill_threshold(processor)
             should_request = (

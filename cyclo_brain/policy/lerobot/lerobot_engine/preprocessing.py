@@ -100,6 +100,14 @@ class PreprocessingMixin:
                 expected - flat_state.size,
             )
             flat_state = np.concatenate([flat_state, pad])
+        elif flat_state.size > expected:
+            logger.warning(
+                "state dim mismatch: got %d, policy expects %d - truncating to %d",
+                flat_state.size,
+                expected,
+                expected,
+            )
+            flat_state = flat_state[:expected]
         batch[_STATE_KEY] = (
             torch.from_numpy(flat_state).unsqueeze(0).to(self._device)
         )

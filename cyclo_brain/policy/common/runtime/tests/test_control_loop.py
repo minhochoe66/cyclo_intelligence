@@ -92,6 +92,20 @@ class ControlLoopSafetyTests(unittest.TestCase):
         np.testing.assert_allclose(robot.commands[0][0], action)
         np.testing.assert_allclose(robot.previews[0][0], action)
 
+    def test_robot_publish_error_does_not_crash_tick(self) -> None:
+        class FailingRobot(FakeRobot):
+            def publish_action(self, action, action_keys) -> None:
+                raise RuntimeError("publish failed")
+
+        processor = FakeProcessor(actions=[np.asarray([0.5], dtype=np.float64)])
+        robot = FailingRobot()
+        loop = self._make_loop(processor, robot)
+        loop._publish_to_robot = True
+
+        loop.tick()
+
+        self.assertEqual(len(robot.previews), 1)
+
     def test_mode_change_clears_buffer(self) -> None:
         processor = FakeProcessor()
         robot = FakeRobot()
