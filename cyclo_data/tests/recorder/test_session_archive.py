@@ -48,6 +48,14 @@ _stub_module("psutil", cpu_percent=lambda interval=None: 0.0)
 from cyclo_data.recorder.session_manager import DataManager  # noqa: E402
 
 
+class _VanishingPath:
+    def is_file(self):
+        return True
+
+    def stat(self):
+        raise FileNotFoundError("removed during scan")
+
+
 def _make_manager(root: Path, *, subtask_total: int = 2) -> DataManager:
     manager = DataManager.__new__(DataManager)
     manager._save_rosbag_path = str(root)
@@ -130,6 +138,10 @@ def _write_segment(
         info["video_stats"] = {"cam0": {"frames_written": 1}}
     (segment / "episode_info.json").write_text(json.dumps(info, indent=2))
     return segment
+
+
+def test_file_size_if_present_ignores_concurrent_removal():
+    assert DataManager._file_size_if_present(_VanishingPath()) == 0
 
 
 def test_archive_moves_segmented_files_and_marks_pending(tmp_path):

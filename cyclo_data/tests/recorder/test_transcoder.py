@@ -53,6 +53,8 @@ from cyclo_data.recorder.transcoder import (  # noqa: E402
     STATUS_PENDING,
     TranscodeWorker,
     _detect_encoder,
+    _mp4_codec_name,
+    _mp4_dimensions,
     _mp4_frame_count,
     _patch_status,
 )
@@ -240,6 +242,22 @@ def test_patch_status_preserves_korean_instruction_as_utf8(tmp_path):
     raw = info_path.read_text(encoding="utf-8")
     assert "화장품 집기" in raw
     assert "\\ud654" not in raw
+
+
+def test_ffprobe_helpers_handle_blank_stdout_without_index_error(monkeypatch, tmp_path):
+    blank = subprocess.CompletedProcess(
+        args=["ffprobe"], returncode=0, stdout="\n  \n",
+    )
+    monkeypatch.setattr(
+        transcoder_module.subprocess,
+        "run",
+        lambda *args, **kwargs: blank,
+    )
+
+    with pytest.raises(RuntimeError, match="could not determine codec"):
+        _mp4_codec_name(tmp_path / "blank.mp4")
+    with pytest.raises(RuntimeError, match="could not determine dimensions"):
+        _mp4_dimensions(tmp_path / "blank.mp4")
 
 
 def _ffprobe_codec(mp4: Path) -> str:

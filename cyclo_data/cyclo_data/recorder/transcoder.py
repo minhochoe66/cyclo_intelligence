@@ -865,7 +865,12 @@ def _mp4_dimensions(mp4: Path) -> tuple[int, int]:
             f"ffprobe dimensions timed out after {_FFPROBE_FRAME_COUNT_TIMEOUT}s "
             f"for {mp4.name}"
         ) from exc
-    text = (out.stdout or "").strip().splitlines()[0] if out.stdout else ""
+    lines = [
+        line.strip()
+        for line in (out.stdout or "").splitlines()
+        if line.strip()
+    ]
+    text = lines[0] if lines else ""
     try:
         width, height = text.split("x", 1)
         return int(width), int(height)
@@ -892,7 +897,12 @@ def _mp4_codec_name(mp4: Path) -> str:
             f"ffprobe codec probe timed out after {_FFPROBE_FRAME_COUNT_TIMEOUT}s "
             f"for {mp4.name}"
         ) from exc
-    codec = (out.stdout or "").strip().splitlines()[0] if out.stdout else ""
+    lines = [
+        line.strip()
+        for line in (out.stdout or "").splitlines()
+        if line.strip()
+    ]
+    codec = lines[0] if lines else ""
     if codec:
         return codec.lower()
     raise RuntimeError(

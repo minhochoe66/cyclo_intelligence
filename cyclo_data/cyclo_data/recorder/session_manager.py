@@ -1110,18 +1110,27 @@ class DataManager:
         has_raw_spool = False
         has_mp4 = False
         for path in videos_dir.rglob('*'):
-            if not path.is_file():
+            size = DataManager._file_size_if_present(path)
+            if size <= 0:
                 continue
-            if path.name.endswith('.mjpeg.tmp') and path.stat().st_size > 0:
+            if path.name.endswith('.mjpeg.tmp'):
                 has_raw_spool = True
             elif (
                 path.suffix == '.mp4'
                 and not path.stem.endswith('_synced')
                 and not path.name.endswith('.remuxing.mp4')
-                and path.stat().st_size > 0
             ):
                 has_mp4 = True
         return has_raw_spool or has_mp4, has_raw_spool, has_mp4
+
+    @staticmethod
+    def _file_size_if_present(path: Path) -> int:
+        try:
+            if not path.is_file():
+                return 0
+            return path.stat().st_size
+        except OSError:
+            return 0
 
     @staticmethod
     def _archive_episode_videos(
@@ -1147,7 +1156,7 @@ class DataManager:
                 expected_cameras.update(
                     path.name[:-len('.mjpeg.tmp')]
                     for path in seg_videos.glob('*.mjpeg.tmp')
-                    if path.stat().st_size > 0
+                    if DataManager._file_size_if_present(path) > 0
                 )
             video_stats = seg_info.get('video_stats') or {}
             if isinstance(video_stats, dict):
@@ -1168,8 +1177,8 @@ class DataManager:
                 dst_sidecar = dst_segment_dir / f'{camera}_timestamps.parquet'
                 dst_stats = dst_segment_dir / f'{camera}_recorder_stats.json'
                 dst_diagnostics = dst_segment_dir / f'{camera}_diagnostics.parquet'
-                has_mp4 = src.exists() and src.stat().st_size > 0
-                has_raw_spool = raw_spool.exists() and raw_spool.stat().st_size > 0
+                has_mp4 = DataManager._file_size_if_present(src) > 0
+                has_raw_spool = DataManager._file_size_if_present(raw_spool) > 0
                 if not has_mp4 and not has_raw_spool:
                     if (
                         (dst.exists() or dst_raw_spool.exists())
@@ -1181,7 +1190,7 @@ class DataManager:
                         continue
                     segment_warnings[camera] = 'missing video file'
                     continue
-                if not sidecar.exists() or sidecar.stat().st_size <= 0:
+                if DataManager._file_size_if_present(sidecar) <= 0:
                     if (
                         (dst.exists() or dst_raw_spool.exists())
                         and dst_sidecar.exists()
@@ -1199,9 +1208,9 @@ class DataManager:
                         DataManager._move_file(raw_spool, dst_raw_spool)
                         segment_raw_cameras.append(camera)
                     DataManager._move_file(sidecar, dst_sidecar)
-                    if stats.exists() and stats.stat().st_size > 0:
+                    if DataManager._file_size_if_present(stats) > 0:
                         DataManager._move_file(stats, dst_stats)
-                    if diagnostics.exists() and diagnostics.stat().st_size > 0:
+                    if DataManager._file_size_if_present(diagnostics) > 0:
                         DataManager._move_file(diagnostics, dst_diagnostics)
                     segment_cameras.append(camera)
                 except Exception as exc:
