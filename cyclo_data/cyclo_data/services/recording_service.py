@@ -328,6 +328,30 @@ class RecordingService:
             status.total_storage_size = float(total_storage)
         if robot_type and not status.robot_type:
             status.robot_type = robot_type
+        if self._video_recorder is not None and hasattr(status, 'recording_warnings'):
+            try:
+                status.recording_warnings = self._video_recorder.recording_warnings()
+            except Exception as exc:  # noqa: BLE001
+                self._node.get_logger().warn(
+                    f'VideoRecorder.recording_warnings() raised: {exc}')
+        if self._video_recorder is not None and hasattr(status, 'camera_monitor_names'):
+            try:
+                camera_monitor = self._video_recorder.camera_monitor_snapshot()
+                status.camera_monitor_names = camera_monitor.get('names', [])
+                status.camera_monitor_topics = camera_monitor.get('topics', [])
+                status.camera_monitor_rates_hz = camera_monitor.get('rates_hz', [])
+                status.camera_monitor_baseline_hz = camera_monitor.get(
+                    'baseline_hz', [])
+                status.camera_monitor_seconds_since_last = camera_monitor.get(
+                    'seconds_since_last', [])
+                status.camera_monitor_status = camera_monitor.get('status', [])
+                status.camera_monitor_timestamp_skew_s = camera_monitor.get(
+                    'timestamp_skew_s', [])
+                status.camera_monitor_timestamp_status = camera_monitor.get(
+                    'timestamp_status', [])
+            except Exception as exc:  # noqa: BLE001
+                self._node.get_logger().warn(
+                    f'VideoRecorder.camera_monitor_snapshot() raised: {exc}')
         self._recording_status_pub.publish(status)
 
     def _publish_umbrella_status(self, status: int, stage: str, message: str) -> None:

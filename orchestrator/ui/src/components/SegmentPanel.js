@@ -121,6 +121,11 @@ export default function SegmentPanel() {
 
     if (pendingEpisodeResetRef.current) {
       const pendingReset = pendingEpisodeResetRef.current;
+      const operationFailed = (
+        pendingReset.type === 'finish' &&
+        recordStatus.recordingOperationStage === 'FINISH_EPISODE' &&
+        ['failed', 'cancelled'].includes(recordStatus.recordingOperationStatus)
+      );
       const savedStatusKnown = Array.isArray(serverSavedSubtaskIndices);
       const noServerSavedSubtasks = (
         !savedStatusKnown || serverSavedSubtaskIndices.length === 0
@@ -136,13 +141,22 @@ export default function SegmentPanel() {
           serverSubtaskIndex === 0 &&
           noServerSavedSubtasks
         );
-      if (resetObserved) {
+      if (operationFailed) {
+        pendingEpisodeResetRef.current = null;
+        setServerResetInProgress(false);
+        setEpisodeAcquisitionStarted(true);
+        toast.error(
+          recordStatus.recordingOperationMessage ||
+          'Finish episode failed; saved subtasks are still available.'
+        );
+      } else if (resetObserved) {
         pendingEpisodeResetRef.current = null;
         setServerResetInProgress(false);
         lastServerEpisodeRef.current = currentFullEpisodeIndex;
         dispatch(resetSegmentProgress());
+      } else {
+        return;
       }
-      return;
     }
 
     const currentEpisode = currentFullEpisodeIndex;
@@ -211,6 +225,9 @@ export default function SegmentPanel() {
     planComplete,
     plannedCountNumber,
     currentFullEpisodeIndex,
+    recordStatus.recordingOperationMessage,
+    recordStatus.recordingOperationStage,
+    recordStatus.recordingOperationStatus,
     recordStatus.topicReceived,
     serverRecording,
     serverResetInProgress,

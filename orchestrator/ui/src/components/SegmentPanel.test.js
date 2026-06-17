@@ -329,4 +329,62 @@ describe('SegmentPanel discard episode target', () => {
     expect(store.getState().tasks.activeSlotIndex).toBe(0);
   });
 
+  test('releases finish pending lock when background archive fails', async () => {
+    const sendRecordCommand = jest.fn().mockResolvedValue({
+      success: true,
+      message: 'ok',
+    });
+    const { store } = renderPanel({
+      sendRecordCommand,
+      taskOverrides: {
+        recordStatus: {
+          recordPhase: RecordPhase.RECORDING,
+          running: true,
+          currentEpisodeNumber: 0,
+          currentSubtaskIndex: 2,
+          subtaskCount: 3,
+          savedSubtaskIndices: [0, 1],
+          topicReceived: true,
+        },
+        plannedCount: 3,
+        plannedSubTasks: ['pick', 'place', 'release'],
+        slotToServerIdx: [0, 1, -1],
+        activeSlotIndex: 2,
+      },
+    });
+
+    const saveButton = await screen.findByRole('button', {
+      name: /save subtask 3/i,
+    });
+    fireEvent.click(saveButton);
+
+    await waitFor(() => {
+      expect(sendRecordCommand).toHaveBeenCalledWith(
+        'finish_episode',
+        expect.anything()
+      );
+      expect(store.getState().tasks.slotToServerIdx).toEqual([-1, -1, -1]);
+    });
+
+    await act(async () => {
+      store.dispatch(setRecordStatus({
+        recordPhase: RecordPhase.READY,
+        running: false,
+        currentEpisodeNumber: 0,
+        currentSubtaskIndex: 2,
+        subtaskCount: 3,
+        savedSubtaskIndices: [0, 1, 2],
+        recordingOperationStatus: 'failed',
+        recordingOperationStage: 'FINISH_EPISODE',
+        recordingOperationMessage: 'Episode finish failed: disk full',
+        topicReceived: true,
+      }));
+      await Promise.resolve();
+    });
+
+    expect(store.getState().tasks.slotToServerIdx).toEqual([0, 1, 2]);
+    expect(store.getState().tasks.activeSlotIndex).toBe(2);
+    expect(toast.error).toHaveBeenCalledWith('Episode finish failed: disk full');
+  });
+
 });
