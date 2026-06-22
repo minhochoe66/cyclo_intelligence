@@ -53,6 +53,7 @@ def _install_ros_stubs():
 
     class _TaskInfo:
         inference_mode = ''
+        action_request_mode = ''
         acceleration_mode = ''
         acceleration_engine_path = ''
 
@@ -150,3 +151,20 @@ def test_load_send_command_sets_acceleration_mode():
     assert action.acceleration_mode == 'tensorrt_dit'
     assert task_info.acceleration_mode == 'tensorrt_dit'
     assert task_info.acceleration_engine_path == 'custom.trt'
+
+
+def test_load_send_command_sets_action_request_mode():
+    context = types.SimpleNamespace(node=_DummyNode())
+
+    action = SendCommand.from_xml_params(
+        context,
+        'LoadInference',
+        {
+            'command': 'LOAD',
+            'action_request_mode': 'sync',
+        },
+    )
+    task_info = action._build_task_info()
+
+    assert action.action_request_mode == 'sync'
+    assert task_info.action_request_mode == 'sync'

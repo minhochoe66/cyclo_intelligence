@@ -28,6 +28,10 @@ string service_type
 # container Main runtime to publish robot command topics.
 string inference_mode
 
+# Action chunk request scheduling. "async" requests the next chunk while the
+# current buffer is still executing. "sync" waits until the buffer is empty.
+string action_request_mode
+
 # Policy acceleration mode. Empty and "pytorch" mean the normal model path.
 # "tensorrt_dit" enables GR00T DiT-only TensorRT acceleration when supported.
 string acceleration_mode

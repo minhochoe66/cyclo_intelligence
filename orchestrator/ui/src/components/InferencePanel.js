@@ -20,8 +20,10 @@ import clsx from 'clsx';
 import toast from 'react-hot-toast';
 import {
   MdFolderOpen,
+  MdHourglassEmpty,
   MdInfoOutline,
   MdPrecisionManufacturing,
+  MdSync,
   MdViewInAr,
   MdWarningAmber,
 } from 'react-icons/md';
@@ -57,6 +59,10 @@ const InferencePanel = () => {
     inferenceStatus.inferencePhase === InferencePhase.INFERENCING;
   const inferenceMode = info.inferenceMode || 'simulation';
   const isRobotMode = inferenceMode === 'robot';
+  const actionRequestMode =
+    String(info.actionRequestMode || '').trim().toLowerCase() === 'sync'
+      ? 'sync'
+      : 'async';
   const isGrootModel = info.serviceType === 'groot';
   const isTensorRtEnabled = info.accelerationMode === 'tensorrt_dit';
   const trtTaskInstruction = (info.taskInstruction?.[0] || '').trim();
@@ -338,6 +344,30 @@ const InferencePanel = () => {
     }
   );
 
+  const actionModeButtonClass = (active) => clsx(
+    'h-8',
+    'min-w-0',
+    'px-2',
+    'rounded-md',
+    'flex',
+    'items-center',
+    'justify-center',
+    'gap-1.5',
+    'text-xs',
+    'font-semibold',
+    'whitespace-nowrap',
+    'transition-colors',
+    'focus:outline-none',
+    'focus:ring-2',
+    active
+      ? 'bg-blue-500 text-white focus:ring-blue-300'
+      : 'bg-white text-gray-600 hover:bg-gray-50 focus:ring-gray-300 border border-gray-200',
+    {
+      'opacity-50 cursor-not-allowed': !isEditable,
+      'cursor-pointer': isEditable,
+    }
+  );
+
   return (
     <div className={classInfoPanel}>
       <div className={clsx('text-lg', 'font-semibold', 'mb-3', 'text-gray-800')}>
@@ -385,6 +415,39 @@ const InferencePanel = () => {
           >
             <MdPrecisionManufacturing size={17} className="shrink-0" />
             <span className="truncate">Real Robot Deploy</span>
+          </button>
+        </div>
+      </div>
+
+      <div className={clsx('flex', 'items-center', 'mb-2.5')}>
+        <div className={clsx(classLabel, 'flex', 'items-center', 'gap-1')}>
+          <Tooltip content="Choose when the next action chunk is requested." position="bottom">
+            <MdInfoOutline className="text-gray-400 hover:text-gray-600 cursor-help" size={14} />
+          </Tooltip>
+          <span>Action Request</span>
+        </div>
+        <div className="grid grid-cols-2 gap-1 flex-1 min-w-0">
+          <button
+            type="button"
+            onClick={() => handleChange('actionRequestMode', 'async')}
+            disabled={!isEditable}
+            className={actionModeButtonClass(actionRequestMode !== 'sync')}
+            aria-label="Use async action requests"
+            title="Async"
+          >
+            <MdSync size={16} className="shrink-0" />
+            <span className="truncate">Async</span>
+          </button>
+          <button
+            type="button"
+            onClick={() => handleChange('actionRequestMode', 'sync')}
+            disabled={!isEditable}
+            className={actionModeButtonClass(actionRequestMode === 'sync')}
+            aria-label="Use sync action requests"
+            title="Sync"
+          >
+            <MdHourglassEmpty size={16} className="shrink-0" />
+            <span className="truncate">Sync</span>
           </button>
         </div>
       </div>
@@ -489,9 +552,7 @@ const InferencePanel = () => {
                 )}
                 disabled={!isEditable}
               />
-              <span className="text-gray-500">
-                {isTensorRtEnabled ? 'Enabled' : 'Disabled'}
-              </span>
+              <span className="text-gray-500">Enable</span>
             </label>
           </div>
           {isTensorRtEnabled && (
@@ -551,27 +612,6 @@ const InferencePanel = () => {
         />
       </div>
 
-      <div className={clsx('flex', 'items-center', 'mb-2.5')}>
-        <div className={clsx(classLabel, 'flex', 'items-center', 'gap-1')}>
-          <Tooltip content="How far ahead inference can jump when joining chunks. Keep small (~0.3s) for loop trajectories." position="bottom">
-            <MdInfoOutline className="text-gray-400 hover:text-gray-600 cursor-help" size={14} />
-          </Tooltip>
-          <span>Max Skip Ahead (s)</span>
-        </div>
-        <input
-          className={classTextInput}
-          type="number"
-          step="0.05"
-          min="0"
-          value={info.chunkAlignWindowS ?? ''}
-          onChange={(e) => {
-            const v = e.target.value;
-            handleChange('chunkAlignWindowS', v === '' ? '' : Number(v));
-          }}
-          disabled={!isEditable}
-        />
-      </div>
-
       {/* Record during inference toggle */}
       <div className={clsx('flex', 'items-center', 'mb-2.5')}>
         <span className={classLabel}>Record</span>
@@ -586,9 +626,7 @@ const InferencePanel = () => {
             onChange={(e) => handleChange('recordInferenceMode', e.target.checked)}
             disabled={!isEditable}
           />
-          <span className="text-gray-500">
-            {info.recordInferenceMode ? 'Enabled' : 'Disabled'}
-          </span>
+          <span className="text-gray-500">Enable</span>
         </label>
       </div>
 

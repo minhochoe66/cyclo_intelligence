@@ -7,6 +7,10 @@ const numberOrDefault = (value, fallback) => {
   return Number.isFinite(parsed) ? parsed : fallback;
 };
 
+const actionRequestModeOrDefault = (value) => (
+  String(value ?? '').trim().toLowerCase() === 'sync' ? 'sync' : 'async'
+);
+
 export const normalizeRecordTaskInfo = (taskInfo = {}) => ({
   taskNum: String(taskInfo.taskNum ?? '').trim(),
   taskName: String(taskInfo.taskName ?? '').trim(),
@@ -21,6 +25,7 @@ export const normalizeRecordTaskInfo = (taskInfo = {}) => ({
   includeRobotisLicense: Boolean(taskInfo.includeRobotisLicense),
   serviceType: String(taskInfo.serviceType ?? '').trim(),
   inferenceMode: String(taskInfo.inferenceMode ?? 'simulation').trim(),
+  actionRequestMode: actionRequestModeOrDefault(taskInfo.actionRequestMode),
   accelerationMode: String(taskInfo.accelerationMode ?? 'pytorch').trim(),
   accelerationEnginePath: String(taskInfo.accelerationEnginePath ?? '').trim(),
 });
@@ -38,6 +43,7 @@ export const rosTaskInfoToUiTaskInfo = (taskInfo = {}) => ({
   recordInferenceMode: Boolean(taskInfo.record_inference_mode),
   serviceType: taskInfo.service_type || 'lerobot',
   inferenceMode: taskInfo.inference_mode || 'simulation',
+  actionRequestMode: actionRequestModeOrDefault(taskInfo.action_request_mode),
   accelerationMode: taskInfo.acceleration_mode || 'pytorch',
   accelerationEnginePath: taskInfo.acceleration_engine_path || '',
   userId: taskInfo.user_id || '',

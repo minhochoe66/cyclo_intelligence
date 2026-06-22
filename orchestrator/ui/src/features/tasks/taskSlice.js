@@ -75,6 +75,7 @@ const initialState = {
     serviceType: 'lerobot',
     policyType: 'act',
     inferenceMode: 'simulation',
+    actionRequestMode: 'async',
     accelerationMode: 'pytorch',
     accelerationEnginePath: '',
   },

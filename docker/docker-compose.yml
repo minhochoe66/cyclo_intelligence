@@ -234,7 +234,9 @@ services:
       - /etc/timezone:/etc/timezone:ro
       - /etc/localtime:/etc/localtime:ro
 
-    restart: unless-stopped
+    # Policy containers are started on demand by the UI/supervisor API.
+    # Do not auto-start them on host boot.
+    restart: "no"
     runtime: nvidia
     healthcheck:
       test:
@@ -354,7 +356,9 @@ services:
       - /etc/timezone:/etc/timezone:ro
       - /etc/localtime:/etc/localtime:ro
 
-    restart: unless-stopped
+    # Policy containers are started on demand by the UI/supervisor API.
+    # Do not auto-start them on host boot.
+    restart: "no"
     runtime: nvidia
     healthcheck:
       test:

@@ -129,6 +129,13 @@ def _service_type_from_model(model: str) -> str:
     return value
 
 
+def _normalize_action_request_mode(value: str) -> str:
+    mode = str(value or '').strip().lower()
+    if mode == 'sync':
+        return 'sync'
+    return 'async'
+
+
 class SendCommand(BaseAction):
     """Drive the orchestrator inference pipeline through lifecycle commands.
 
@@ -160,6 +167,11 @@ class SendCommand(BaseAction):
             if command_str == 'LOAD'
             else ''
         )
+        action_request_mode = (
+            params.get('action_request_mode', 'async')
+            if command_str == 'LOAD'
+            else ''
+        )
         action = cls(
             node=context.node,
             command=command,
@@ -170,6 +182,7 @@ class SendCommand(BaseAction):
             control_hz=params.get('control_hz', 100),
             chunk_align_window_s=params.get('chunk_align_window_s', 0.3),
             inference_mode=inference_mode,
+            action_request_mode=action_request_mode,
             acceleration_mode=acceleration_mode,
             acceleration_engine_path=params.get('acceleration_engine_path', ''),
         )
@@ -192,6 +205,7 @@ class SendCommand(BaseAction):
         control_hz: int = 100,
         chunk_align_window_s: float = 0.3,
         inference_mode: str = 'simulation',
+        action_request_mode: str = 'async',
         acceleration_mode: str = 'pytorch',
         acceleration_engine_path: str = '',
         service_name: str = '/task/command',
@@ -208,6 +222,11 @@ class SendCommand(BaseAction):
         )
         self.inference_mode = (
             (inference_mode or 'simulation').strip().lower()
+            if self.command_str == 'LOAD'
+            else ''
+        )
+        self.action_request_mode = (
+            _normalize_action_request_mode(action_request_mode)
             if self.command_str == 'LOAD'
             else ''
         )
@@ -415,6 +434,8 @@ class SendCommand(BaseAction):
         ti.service_type = _service_type_from_model(self.model)
         if self.command_str == 'LOAD' and hasattr(ti, 'inference_mode'):
             ti.inference_mode = self.inference_mode
+        if self.command_str == 'LOAD' and hasattr(ti, 'action_request_mode'):
+            ti.action_request_mode = self.action_request_mode
         ti.tags = (
             [f'inference_mode:{self.inference_mode}']
             if self.command_str == 'LOAD'

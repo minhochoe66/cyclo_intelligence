@@ -302,6 +302,11 @@ export function useRosServiceCaller() {
         const accelerationEnginePath = taskInfo.serviceType === 'groot'
           ? String(taskInfo.accelerationEnginePath || '').trim()
           : '';
+        const actionRequestMode = (
+          String(taskInfo.actionRequestMode || '').trim().toLowerCase() === 'sync'
+            ? 'sync'
+            : 'async'
+        );
 
         const request = {
           task_info: {
@@ -323,6 +328,7 @@ export function useRosServiceCaller() {
             include_robotis_license: Boolean(taskInfo.includeRobotisLicense),
             service_type: String(taskInfo.serviceType || ''),
             inference_mode: String(inferenceMode),
+            action_request_mode: actionRequestMode,
             acceleration_mode: accelerationMode || 'pytorch',
             acceleration_engine_path: accelerationEnginePath,
           },

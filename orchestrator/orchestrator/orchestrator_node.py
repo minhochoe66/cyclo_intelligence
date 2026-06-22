@@ -190,6 +190,7 @@ class OrchestratorNode(Node):
         self._loaded_inference_publish_to_robot: bool = False
         self._loaded_inference_acceleration_mode: str = 'pytorch'
         self._loaded_inference_acceleration_engine_path: str = ''
+        self._loaded_inference_action_request_mode: str = 'async'
 
         # HF endpoint registry — orchestrator-owned because the
         # set/get/list/select_hf_endpoint services also read and mutate
@@ -1215,6 +1216,9 @@ class OrchestratorNode(Node):
                 requested_acceleration_mode, requested_acceleration_engine_path = (
                     self._acceleration_from_task_info(task_info)
                 )
+                requested_action_request_mode = (
+                    self._action_request_mode_from_task_info(task_info)
+                )
 
                 # If the requested policy is already loaded on this
                 # container, treat START_INFERENCE as RESUME. If the user
@@ -1240,6 +1244,9 @@ class OrchestratorNode(Node):
                     loaded_acceleration_engine_path = (
                         self._loaded_inference_acceleration_engine_path
                     )
+                    loaded_action_request_mode = (
+                        self._loaded_inference_action_request_mode
+                    )
                 start_handled = False
                 if (
                     existing_client is not None
@@ -1249,11 +1256,13 @@ class OrchestratorNode(Node):
                         loaded_policy_path,
                         loaded_acceleration_mode,
                         loaded_acceleration_engine_path,
+                        loaded_action_request_mode,
                     )
                     requested_signature = (
                         requested_policy_path,
                         requested_acceleration_mode,
                         requested_acceleration_engine_path,
+                        requested_action_request_mode,
                     )
                     if (
                         requested_policy_path
@@ -1355,6 +1364,7 @@ class OrchestratorNode(Node):
                                 acceleration_engine_path=(
                                     requested_acceleration_engine_path
                                 ),
+                                action_request_mode=requested_action_request_mode,
                             )
                             if not load_result.success:
                                 self.get_logger().error(
@@ -1402,6 +1412,9 @@ class OrchestratorNode(Node):
                                     )
                                     self._loaded_inference_acceleration_engine_path = (
                                         requested_acceleration_engine_path
+                                    )
+                                    self._loaded_inference_action_request_mode = (
+                                        requested_action_request_mode
                                     )
                             self._publish_inference_phase(InferenceStatus.INFERENCING)
                         except Exception as e:
@@ -2249,6 +2262,19 @@ class OrchestratorNode(Node):
             engine_path = ''
         return mode, engine_path
 
+    @staticmethod
+    def _normalize_action_request_mode(value: str) -> str:
+        mode = str(value or '').strip().lower()
+        if mode == 'sync':
+            return 'sync'
+        return 'async'
+
+    @classmethod
+    def _action_request_mode_from_task_info(cls, task_info) -> str:
+        return cls._normalize_action_request_mode(
+            getattr(task_info, 'action_request_mode', '')
+        )
+
     def _determine_service_prefix(self, task_info) -> str:
         """Determine inference service prefix from task_info or policy config.
 
@@ -2309,6 +2335,7 @@ class OrchestratorNode(Node):
             self._loaded_inference_publish_to_robot = False
             self._loaded_inference_acceleration_mode = 'pytorch'
             self._loaded_inference_acceleration_engine_path = ''
+            self._loaded_inference_action_request_mode = 'async'
         if client is None:
             return
 
