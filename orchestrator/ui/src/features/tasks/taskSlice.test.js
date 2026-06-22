@@ -4,9 +4,14 @@ import reducer, {
   markInferenceTaskInfoSyncSuccess,
   markLocalTaskInfoEdited,
   markTaskInfoSyncSuccess,
+  persistRobotType,
   receiveServerRecordTaskInfo,
+  resolveInitialRobotType,
+  ROBOT_TYPE_STORAGE_KEY,
+  ROBOT_TYPE_STATUS_GUARD_MS,
   selectInferenceTaskInfo,
   selectRecordTaskInfo,
+  selectRobotType,
   setCameraRecordingMonitor,
   setInferenceMode,
   setInferenceTaskInfo,
@@ -17,6 +22,22 @@ import {
   getInferenceTaskInfoKey,
   getRecordTaskInfoKey,
 } from '../../utils/taskInfoSync';
+
+const makeStorage = (initial = {}) => {
+  const values = { ...initial };
+  return {
+    getItem: jest.fn((key) => (
+      Object.prototype.hasOwnProperty.call(values, key) ? values[key] : null
+    )),
+    setItem: jest.fn((key, value) => {
+      values[key] = value;
+    }),
+    removeItem: jest.fn((key) => {
+      delete values[key];
+    }),
+    values,
+  };
+};
 
 describe('taskSlice task ownership', () => {
   test('defaults inference to simulation mode', () => {
@@ -495,6 +516,143 @@ describe('taskSlice task ownership', () => {
     expect(selectInferenceTaskInfo({ tasks: next }).taskInstruction).toEqual([
       'record page prompt',
     ]);
+  });
+
+  test('inference echo queues record sync when shared instruction changes record payload', () => {
+    const withRecordInfo = reducer(
+      reducer(
+        undefined,
+        setRecordTaskInfo({
+          taskNum: '7',
+          taskName: 'record-task',
+          taskInstruction: ['old prompt'],
+          subtaskInstruction: ['record sub'],
+        })
+      ),
+      markTaskInfoSyncSuccess()
+    );
+    const oldRecordTaskKey = getRecordTaskInfoKey(
+      selectRecordTaskInfo({ tasks: withRecordInfo })
+    );
+
+    const next = reducer(
+      withRecordInfo,
+      receiveServerRecordTaskInfo({
+        taskType: 'inference',
+        taskInstruction: ['new prompt'],
+        policyPath: '/policy/new',
+        serviceType: 'groot',
+      })
+    );
+
+    expect(selectRecordTaskInfo({ tasks: next }).taskInstruction).toEqual([
+      'new prompt',
+    ]);
+    expect(selectInferenceTaskInfo({ tasks: next }).taskInstruction).toEqual([
+      'new prompt',
+    ]);
+    expect(next.taskInfoSync.serverTaskKey).toBe(oldRecordTaskKey);
+    expect(next.taskInfoSync.editBaseServerTaskKey).toBe(oldRecordTaskKey);
+    expect(next.taskInfoSync.dirty).toBe(true);
+    expect(next.taskInfoSync.conflict).toBe(false);
+    expect(next.taskInfoSync.syncStatus).toBe('pending');
+    expect(next.inferenceTaskInfoSync.syncStatus).toBe('synced');
+  });
+});
+
+describe('taskSlice robot type session state', () => {
+  test('restores robot type from tab session storage', () => {
+    const storage = makeStorage({
+      [ROBOT_TYPE_STORAGE_KEY]: ' ffw_sg2_rev2 ',
+    });
+
+    expect(resolveInitialRobotType(storage)).toBe('ffw_sg2_rev2');
+  });
+
+  test('persists and clears robot type', () => {
+    const storage = makeStorage();
+
+    persistRobotType(' ffw_sg2_rev2 ', storage);
+    persistRobotType('', storage);
+
+    expect(storage.setItem).toHaveBeenCalledWith(
+      ROBOT_TYPE_STORAGE_KEY,
+      'ffw_sg2_rev2'
+    );
+    expect(storage.removeItem).toHaveBeenCalledWith(ROBOT_TYPE_STORAGE_KEY);
+  });
+
+  test('user-selected robot type ignores stale status during guard window', () => {
+    const selectedAtMs = 1000;
+    const selected = reducer(
+      undefined,
+      selectRobotType({
+        robotType: 'ffw_sg2_rev2',
+        source: 'user',
+        selectedAtMs,
+      })
+    );
+
+    const staleStatus = reducer(
+      selected,
+      selectRobotType({
+        robotType: 'ffw_sg2_rev1',
+        source: 'status',
+        receivedAtMs: selectedAtMs + 100,
+      })
+    );
+
+    expect(staleStatus.robotType).toBe('ffw_sg2_rev2');
+    expect(staleStatus.robotTypeStatusGuardUntilMs).toBe(
+      selectedAtMs + ROBOT_TYPE_STATUS_GUARD_MS
+    );
+  });
+
+  test('matching robot status clears user-selection guard', () => {
+    const selectedAtMs = 1000;
+    const selected = reducer(
+      undefined,
+      selectRobotType({
+        robotType: 'ffw_sg2_rev2',
+        source: 'user',
+        selectedAtMs,
+      })
+    );
+
+    const confirmed = reducer(
+      selected,
+      selectRobotType({
+        robotType: 'ffw_sg2_rev2',
+        source: 'status',
+        receivedAtMs: selectedAtMs + 100,
+      })
+    );
+
+    expect(confirmed.robotType).toBe('ffw_sg2_rev2');
+    expect(confirmed.robotTypeStatusGuardUntilMs).toBe(0);
+  });
+
+  test('robot status can update after user-selection guard expires', () => {
+    const selectedAtMs = 1000;
+    const selected = reducer(
+      undefined,
+      selectRobotType({
+        robotType: 'ffw_sg2_rev2',
+        source: 'user',
+        selectedAtMs,
+      })
+    );
+
+    const laterStatus = reducer(
+      selected,
+      selectRobotType({
+        robotType: 'ffw_sg2_rev1',
+        source: 'status',
+        receivedAtMs: selectedAtMs + ROBOT_TYPE_STATUS_GUARD_MS + 1,
+      })
+    );
+
+    expect(laterStatus.robotType).toBe('ffw_sg2_rev1');
   });
 });
 

@@ -278,9 +278,18 @@ export function useRosTopicSubscription() {
           currentPhase === RecordPhase.RECORDING ||
           currentPhase === RecordPhase.SAVING;
         // Adopt robot_type as the global value when present.
-        if (msg.robot_type && msg.robot_type.trim() !== '' &&
-            msg.robot_type !== store.getState().tasks.robotType) {
-          dispatch(selectRobotType(msg.robot_type));
+        if (msg.robot_type && msg.robot_type.trim() !== '') {
+          const tasksState = store.getState().tasks;
+          const shouldUpdateRobotType =
+            msg.robot_type !== tasksState.robotType ||
+            Boolean(tasksState.robotTypeStatusGuardUntilMs);
+          if (shouldUpdateRobotType) {
+            dispatch(selectRobotType({
+              robotType: msg.robot_type,
+              source: 'status',
+              receivedAtMs: Date.now(),
+            }));
+          }
         }
 
         if (!monitorOnlyMessage) {
@@ -432,9 +441,18 @@ export function useRosTopicSubscription() {
         }
         previousInferenceErrorRef.current = msg.error || '';
 
-        if (msg.robot_type && msg.robot_type.trim() !== '' &&
-            msg.robot_type !== store.getState().tasks.robotType) {
-          dispatch(selectRobotType(msg.robot_type));
+        if (msg.robot_type && msg.robot_type.trim() !== '') {
+          const tasksState = store.getState().tasks;
+          const shouldUpdateRobotType =
+            msg.robot_type !== tasksState.robotType ||
+            Boolean(tasksState.robotTypeStatusGuardUntilMs);
+          if (shouldUpdateRobotType) {
+            dispatch(selectRobotType({
+              robotType: msg.robot_type,
+              source: 'status',
+              receivedAtMs: Date.now(),
+            }));
+          }
         }
 
         dispatch(

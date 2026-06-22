@@ -26,6 +26,46 @@ import {
 const SYNCED_MESSAGE = 'Session task info synced.';
 const CONFLICT_MESSAGE = 'Server task info changed while editing; local draft not synced.';
 const FAILED_MESSAGE = 'Task info not synced; robot button may use old task.';
+export const ROBOT_TYPE_STORAGE_KEY = 'cyclo_intelligence.robot_type';
+export const ROBOT_TYPE_STATUS_GUARD_MS = 30000;
+
+const getSessionStorage = () => {
+  if (typeof window === 'undefined') {
+    return null;
+  }
+  try {
+    return window.sessionStorage;
+  } catch (_error) {
+    return null;
+  }
+};
+
+export const resolveInitialRobotType = (storage = getSessionStorage()) => {
+  if (!storage) {
+    return '';
+  }
+  try {
+    return String(storage.getItem(ROBOT_TYPE_STORAGE_KEY) || '').trim();
+  } catch (_error) {
+    return '';
+  }
+};
+
+export const persistRobotType = (robotType, storage = getSessionStorage()) => {
+  if (!storage) {
+    return;
+  }
+  try {
+    const normalizedRobotType = String(robotType || '').trim();
+    if (normalizedRobotType) {
+      storage.setItem(ROBOT_TYPE_STORAGE_KEY, normalizedRobotType);
+    } else {
+      storage.removeItem(ROBOT_TYPE_STORAGE_KEY);
+    }
+  } catch (_error) {
+    // Storage can be disabled in private/browser-restricted contexts.
+  }
+};
 
 const syncInitialState = {
   serverTaskKey: '',
@@ -143,6 +183,11 @@ const getRecordIdentityKey = (taskInfo = {}) => JSON.stringify({
   taskName: String(taskInfo.taskName ?? '').trim(),
   subtaskInstruction: stringArray(taskInfo.subtaskInstruction),
 });
+
+const hasRecordTaskIdentity = (taskInfo = {}) => (
+  Boolean(String(taskInfo.taskNum ?? '').trim()) &&
+  Boolean(String(taskInfo.taskName ?? '').trim())
+);
 
 const getInstructionKey = (taskInfo = {}) => JSON.stringify(
   stringArray(taskInfo.taskInstruction)
@@ -265,7 +310,8 @@ const applyInferenceTaskInfo = (state, taskInfo = {}) => {
 };
 
 const initialState = {
-  robotType: '',
+  robotType: resolveInitialRobotType(),
+  robotTypeStatusGuardUntilMs: 0,
 
   sharedTaskInfo: { ...sharedTaskInfoInitialState },
   recordTaskInfo: copyRecordTaskInfo(),
@@ -382,7 +428,41 @@ const taskSlice = createSlice({
       state.inferenceStatus = initialState.inferenceStatus;
     },
     selectRobotType: (state, action) => {
-      state.robotType = action.payload;
+      const payload = action.payload || '';
+      const robotType = typeof payload === 'object'
+        ? payload.robotType
+        : payload;
+      const normalizedRobotType = String(robotType || '').trim();
+      const source = typeof payload === 'object'
+        ? payload.source || 'local'
+        : 'local';
+      const receivedAtMs = Number(
+        typeof payload === 'object' ? payload.receivedAtMs || 0 : 0
+      );
+
+      if (source === 'status') {
+        if (
+          state.robotTypeStatusGuardUntilMs &&
+          receivedAtMs < state.robotTypeStatusGuardUntilMs &&
+          normalizedRobotType &&
+          normalizedRobotType !== state.robotType
+        ) {
+          return;
+        }
+        if (normalizedRobotType === state.robotType) {
+          state.robotTypeStatusGuardUntilMs = 0;
+        }
+      } else if (source === 'user') {
+        const selectedAtMs = Number(
+          typeof payload === 'object' ? payload.selectedAtMs || 0 : 0
+        );
+        state.robotTypeStatusGuardUntilMs =
+          selectedAtMs > 0 ? selectedAtMs + ROBOT_TYPE_STATUS_GUARD_MS : 0;
+      } else {
+        state.robotTypeStatusGuardUntilMs = 0;
+      }
+
+      state.robotType = normalizedRobotType;
     },
     setTaskType: (state, action) => {
       state.recordTaskInfo.taskType = action.payload || 'record';
@@ -546,8 +626,11 @@ const taskSlice = createSlice({
       const isInferenceEcho = serverTaskInfo.taskType === 'inference';
       if (isInferenceEcho) {
         const currentInferenceTaskInfo = buildInferenceTaskInfo(state);
+        const currentRecordTaskInfo = buildRecordTaskInfo(state);
+        const currentRecordTaskKey = getRecordTaskInfoKey(currentRecordTaskInfo);
+        const hasLocalRecordEdit = hasLocalRecordTaskInfoEdit(state);
         const protectRecordSharedInstruction = Boolean(
-          hasLocalRecordTaskInfoEdit(state) &&
+          hasLocalRecordEdit &&
           Object.prototype.hasOwnProperty.call(serverTaskInfo, 'taskInstruction') &&
           getInstructionKey(serverTaskInfo) !== getInstructionKey(currentInferenceTaskInfo)
         );
@@ -584,6 +667,20 @@ const taskSlice = createSlice({
         state.inferenceTaskInfoSync.dirty = false;
         state.inferenceTaskInfoSync.syncStatus = 'synced';
         state.inferenceTaskInfoSync.syncMessage = SYNCED_MESSAGE;
+        const nextRecordTaskInfo = buildRecordTaskInfo(state);
+        const nextRecordTaskKey = getRecordTaskInfoKey(nextRecordTaskInfo);
+        if (
+          !hasLocalRecordEdit &&
+          hasRecordTaskIdentity(nextRecordTaskInfo) &&
+          nextRecordTaskKey !== currentRecordTaskKey &&
+          nextRecordTaskKey !== state.taskInfoSync.serverTaskKey
+        ) {
+          state.taskInfoSync.editBaseServerTaskKey = state.taskInfoSync.serverTaskKey;
+          state.taskInfoSync.dirty = true;
+          state.taskInfoSync.conflict = false;
+          state.taskInfoSync.syncStatus = 'pending';
+          state.taskInfoSync.syncMessage = 'Task info changed; syncing soon...';
+        }
         return;
       }
 
