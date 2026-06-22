@@ -14,8 +14,8 @@
 //
 // Author: Kiwoong Park
 
-import React, { useState, useEffect, useCallback } from 'react';
-import { useSelector, useDispatch } from 'react-redux';
+import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
+import { shallowEqual, useSelector, useDispatch } from 'react-redux';
 import clsx from 'clsx';
 import toast from 'react-hot-toast';
 import {
@@ -34,14 +34,27 @@ import TrtEngineControl from './TrtEngineControl';
 import Tooltip from './Tooltip';
 import { InferencePhase } from '../constants/taskPhases';
 import { DEFAULT_PATHS } from '../constants/paths';
-import { setInferenceMode, setTaskInfo } from '../features/tasks/taskSlice';
+import {
+  markLocalTaskInfoEdited,
+  markInferenceTaskInfoSyncFailed,
+  markInferenceTaskInfoSyncing,
+  markInferenceTaskInfoSyncPending,
+  markInferenceTaskInfoSyncSuccess,
+  selectInferenceTaskInfo,
+  setInferenceMode,
+  setInferenceTaskInfo,
+} from '../features/tasks/taskSlice';
 import { useRosServiceCaller } from '../hooks/useRosServiceCaller';
 import { requiresInstruction } from '../constants/policyCapabilities';
+import { getInferenceTaskInfoKey } from '../utils/taskInfoSync';
+
+const AUTO_SYNC_DELAY_MS = 700;
 
 const InferencePanel = () => {
   const dispatch = useDispatch();
 
-  const info = useSelector((state) => state.tasks.taskInfo);
+  const info = useSelector(selectInferenceTaskInfo, shallowEqual);
+  const taskInfoSync = useSelector((state) => state.tasks.inferenceTaskInfoSync);
   const robotType = useSelector((state) => state.tasks.robotType);
   const inferenceStatus = useSelector((state) => state.tasks.inferenceStatus);
   const showInstruction = requiresInstruction(info.serviceType, info.policyType);
@@ -49,8 +62,6 @@ const InferencePanel = () => {
   const [isTaskStatusPaused, setIsTaskStatusPaused] = useState(false);
   const [lastTaskStatusUpdate, setLastTaskStatusUpdate] = useState(Date.now());
   const [showPolicyBrowser, setShowPolicyBrowser] = useState(false);
-  const [isPrepared, setIsPrepared] = useState(false);
-  const [isPreparing, setIsPreparing] = useState(false);
 
   // InferencePage's lock — only the inference-side phase matters here.
   // Record phase is the InfoPanel's concern (D18, plan record-zippy-sunrise).
@@ -75,6 +86,8 @@ const InferencePanel = () => {
   const disabled = isTaskRunning;
   const [isEditable, setIsEditable] = useState(!disabled);
   const [isUpdatingInstruction, setIsUpdatingInstruction] = useState(false);
+  const syncGenerationRef = useRef(0);
+  const syncTimerRef = useRef(null);
 
   const { sendRecordCommand } = useRosServiceCaller();
 
@@ -84,10 +97,80 @@ const InferencePanel = () => {
       // multi-task language-conditioned policy can be re-conditioned via
       // the "Update Task Instruction" button below.
       if (field !== 'taskInstruction' && !isEditable) return;
-      dispatch(setTaskInfo({ ...info, [field]: value }));
+      dispatch(setInferenceTaskInfo({ [field]: value }));
+      dispatch(markLocalTaskInfoEdited({ source: 'inference' }));
     },
-    [isEditable, info, dispatch]
+    [isEditable, dispatch]
   );
+
+  const taskSyncKey = useMemo(
+    () => getInferenceTaskInfoKey(info),
+    [info]
+  );
+
+  useEffect(
+    () => () => {
+      if (syncTimerRef.current) {
+        clearTimeout(syncTimerRef.current);
+      }
+    },
+    []
+  );
+
+  useEffect(() => {
+    if (syncTimerRef.current) {
+      clearTimeout(syncTimerRef.current);
+      syncTimerRef.current = null;
+    }
+
+    if (taskInfoSync.conflict) {
+      return;
+    }
+
+    if (!taskInfoSync.dirty) {
+      return;
+    }
+
+    const generation = syncGenerationRef.current + 1;
+    syncGenerationRef.current = generation;
+    const submittedTaskKey = taskSyncKey;
+    dispatch(markInferenceTaskInfoSyncPending());
+
+    syncTimerRef.current = setTimeout(async () => {
+      dispatch(markInferenceTaskInfoSyncing());
+      try {
+        const result = await sendRecordCommand('set_task_info', {
+          autofillEmptyTaskFields: false,
+        });
+        if (syncGenerationRef.current !== generation) return;
+        if (result && result.success) {
+          dispatch(markInferenceTaskInfoSyncSuccess({ taskKey: submittedTaskKey }));
+        } else {
+          dispatch(markInferenceTaskInfoSyncFailed(
+            (result && result.message) || 'Inference task info not synced.'
+          ));
+        }
+      } catch (error) {
+        if (syncGenerationRef.current !== generation) return;
+        dispatch(markInferenceTaskInfoSyncFailed(
+          `Inference task info not synced. ${error.message || error}`
+        ));
+      }
+    }, AUTO_SYNC_DELAY_MS);
+
+    return () => {
+      if (syncTimerRef.current) {
+        clearTimeout(syncTimerRef.current);
+        syncTimerRef.current = null;
+      }
+    };
+  }, [
+    dispatch,
+    sendRecordCommand,
+    taskInfoSync.conflict,
+    taskInfoSync.dirty,
+    taskSyncKey,
+  ]);
 
   const handleDeployModeChange = useCallback(
     async (mode) => {
@@ -106,6 +189,7 @@ const InferencePanel = () => {
       }
 
       dispatch(setInferenceMode(mode));
+      dispatch(markLocalTaskInfoEdited({ source: 'inference' }));
     },
     [
       dispatch,
@@ -119,12 +203,6 @@ const InferencePanel = () => {
   const currentInstruction = (info.taskInstruction?.[0] || '').trim();
   const canUpdateInstruction =
     isInferencing && currentInstruction !== '' && !isUpdatingInstruction;
-  const canPrepareInferenceRecord =
-    info.recordInferenceMode &&
-    !disabled &&
-    !isPreparing &&
-    Boolean(String(info.taskNum || '').trim()) &&
-    Boolean(String(info.taskName || '').trim());
 
   const handleUpdateInstruction = useCallback(async () => {
     if (!canUpdateInstruction) return;
@@ -147,46 +225,15 @@ const InferencePanel = () => {
     }
   }, [canUpdateInstruction, sendRecordCommand, currentInstruction]);
 
-  const handlePrepareInferenceRecord = useCallback(async () => {
-    if (!canPrepareInferenceRecord) {
-      if (!String(info.taskNum || '').trim() || !String(info.taskName || '').trim()) {
-        toast.error('Fill in Task Num and Task Name first.');
-      }
-      return;
-    }
-    setIsPreparing(true);
-    try {
-      const result = await sendRecordCommand('prepare_session', {
-        subtaskInstruction: [],
-      });
-      if (result?.success) {
-        setIsPrepared(true);
-        toast.success(result.message || 'Inference record session prepared.');
-      } else {
-        setIsPrepared(false);
-        toast.error(result?.message || 'Prepare failed');
-      }
-    } catch (error) {
-      setIsPrepared(false);
-      toast.error(`Prepare failed: ${error.message || error}`);
-    } finally {
-      setIsPreparing(false);
-    }
-  }, [
-    canPrepareInferenceRecord,
-    info.taskNum,
-    info.taskName,
-    sendRecordCommand,
-  ]);
-
   const handlePolicyFolderSelect = useCallback((item) => {
     if (!isEditable) return;
     const fullPath = item?.full_path || '';
     if (fullPath) {
-      dispatch(setTaskInfo({ ...info, policyPath: fullPath }));
+      dispatch(setInferenceTaskInfo({ policyPath: fullPath }));
+      dispatch(markLocalTaskInfoEdited({ source: 'inference' }));
     }
     setShowPolicyBrowser(false);
-  }, [isEditable, info, dispatch]);
+  }, [isEditable, dispatch]);
 
   const policyBrowserPath =
     info.serviceType === 'groot'
@@ -197,10 +244,6 @@ const InferencePanel = () => {
   useEffect(() => {
     setIsEditable(!disabled);
   }, [disabled]);
-
-  useEffect(() => {
-    setIsPrepared(false);
-  }, [info.recordInferenceMode, info.taskNum, info.taskName]);
 
   // track task status update
   useEffect(() => {
@@ -238,27 +281,6 @@ const InferencePanel = () => {
     'relative',
     'overflow-y-auto',
     'scrollbar-thin'
-  );
-
-  const classTaskNameTextarea = clsx(
-    'text-sm',
-    'resize-y',
-    'min-h-8',
-    'max-h-20',
-    'h-10',
-    'w-full',
-    'p-2',
-    'border',
-    'border-gray-300',
-    'rounded-md',
-    'focus:outline-none',
-    'focus:ring-2',
-    'focus:ring-blue-500',
-    'focus:border-transparent',
-    {
-      'bg-gray-100 cursor-not-allowed': !isEditable,
-      'bg-white': isEditable,
-    }
   );
 
   // taskInstruction stays always-editable so multi-task LLM-conditioned
@@ -477,7 +499,7 @@ const InferencePanel = () => {
             <span className={clsx(classLabel, 'pt-2')}>Task Instruction</span>
             <textarea
               className={classTaskInstructionTextarea}
-              value={info.taskInstruction || ''}
+              value={(info.taskInstruction && info.taskInstruction[0]) || ''}
               onChange={(e) => handleChange('taskInstruction', [e.target.value])}
               placeholder="Enter Task Instruction"
             />
@@ -611,104 +633,6 @@ const InferencePanel = () => {
           disabled={!isEditable}
         />
       </div>
-
-      {/* Record during inference toggle */}
-      <div className={clsx('flex', 'items-center', 'mb-2.5')}>
-        <span className={classLabel}>Record</span>
-        <label className={clsx('flex', 'items-center', 'gap-2', 'text-sm')}>
-          <input
-            type="checkbox"
-            className={clsx('w-4 h-4', {
-              'cursor-not-allowed opacity-50': !isEditable,
-              'cursor-pointer': isEditable,
-            })}
-            checked={!!info.recordInferenceMode}
-            onChange={(e) => handleChange('recordInferenceMode', e.target.checked)}
-            disabled={!isEditable}
-          />
-          <span className="text-gray-500">Enable</span>
-        </label>
-      </div>
-
-      {/* Recording-only fields */}
-      {info.recordInferenceMode && (
-        <>
-          <div className={clsx('flex', 'items-center', 'mb-2.5')}>
-            <span className={classLabel}>Task Num</span>
-            <textarea
-              className={classTaskNameTextarea}
-              value={info.taskNum || ''}
-              onChange={(e) => handleChange('taskNum', e.target.value)}
-              disabled={!isEditable}
-              placeholder="Enter Task Num"
-            />
-          </div>
-
-          <div className={clsx('flex', 'items-center', 'mb-2.5')}>
-            <span className={classLabel}>Task Name</span>
-            <textarea
-              className={classTaskNameTextarea}
-              value={info.taskName || ''}
-              onChange={(e) => handleChange('taskName', e.target.value)}
-              disabled={!isEditable}
-              placeholder="Enter Task Name"
-            />
-          </div>
-
-          {/* Dataset save path indicator */}
-          <button
-            type="button"
-            onClick={handlePrepareInferenceRecord}
-            disabled={!canPrepareInferenceRecord}
-            title={
-              !canPrepareInferenceRecord && !isPreparing
-                ? 'Enable Record and fill in Task Num and Task Name first.'
-                : isPrepared
-                  ? 'Inference record session prepared.'
-                  : 'Click to arm this inference recording task for trigger input.'
-            }
-            className={clsx(
-              'flex',
-              'flex-col',
-              'items-center',
-              'w-full',
-              'text-xs',
-              'mt-3',
-              'leading-relaxed',
-              'p-2',
-              'rounded-md',
-              'border',
-              'transition-colors',
-              'focus:outline-none',
-              'focus:ring-2',
-              'focus:ring-blue-400',
-              {
-                'bg-gray-100 border-gray-200 text-gray-500 hover:bg-blue-50 hover:border-blue-300 cursor-pointer':
-                  canPrepareInferenceRecord && !isPrepared,
-                'bg-green-50 border-green-300 text-green-700 hover:bg-green-100 cursor-pointer':
-                  canPrepareInferenceRecord && isPrepared,
-                'bg-gray-100 border-gray-200 text-gray-400 cursor-not-allowed':
-                  !canPrepareInferenceRecord,
-              }
-            )}
-          >
-            <div>
-              {isPreparing
-                ? 'Preparing…'
-                : isPrepared
-                  ? 'Session ready — use leader to record'
-                  : 'Click to prepare session as:'}
-            </div>
-            <div className={clsx('font-bold', 'break-all', {
-              'text-blue-500': !isPrepared,
-              'text-green-700': isPrepared,
-            })}
-            >
-              Task_{info.taskNum}_{info.taskName}_Inference_MCAP
-            </div>
-          </button>
-        </>
-      )}
 
       <FileBrowserModal
         isOpen={showPolicyBrowser}

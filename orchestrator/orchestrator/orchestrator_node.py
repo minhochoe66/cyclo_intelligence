@@ -369,6 +369,49 @@ class OrchestratorNode(Node):
             self.get_logger().info(
                 f'{source}: cached task_info for existing task={task_name}')
 
+    @staticmethod
+    def _copy_task_info(task_info: TaskInfo) -> TaskInfo:
+        copied = TaskInfo()
+        for field_name in (
+            'task_num',
+            'task_name',
+            'task_type',
+            'task_instruction',
+            'subtask_instruction',
+            'policy_path',
+            'tags',
+            'record_inference_mode',
+            'control_hz',
+            'inference_hz',
+            'chunk_align_window_s',
+            'include_robotis_license',
+            'service_type',
+            'inference_mode',
+            'action_request_mode',
+            'acceleration_mode',
+            'acceleration_engine_path',
+        ):
+            value = getattr(task_info, field_name)
+            if isinstance(value, list):
+                value = list(value)
+            setattr(copied, field_name, value)
+        return copied
+
+    def _get_inference_record_task_info(self) -> Optional[TaskInfo]:
+        task_info = self._prepared_inference_task_info
+        if task_info is None:
+            task_info = self._last_ui_task_info
+        if task_info is None:
+            return None
+        if getattr(task_info, 'task_type', '') != 'inference':
+            task_info = self._copy_task_info(task_info)
+            task_info.task_type = 'inference'
+            task_info.subtask_instruction = []
+        task_info.record_inference_mode = True
+        self._prepared_inference_task_info = task_info
+        self._last_ui_task_info = task_info
+        return task_info
+
     def _data_operation_status_callback(self, msg: DataOperationStatus):
         """Debug-log DataOperationStatus arrivals.
 
@@ -1205,6 +1248,7 @@ class OrchestratorNode(Node):
 
             elif request.command == SendCommand.Request.START_INFERENCE:
                 task_info = request.task_info
+                self._cache_ui_task_info(task_info, 'START_INFERENCE')
 
                 task_instruction = (
                     task_info.task_instruction[0]
@@ -1674,6 +1718,10 @@ class OrchestratorNode(Node):
                     elif request.command == SendCommand.Request.UPDATE_INSTRUCTION:
                         # Mid-run language re-conditioning. Lifecycle stays
                         # at INFERENCING — no inference_phase publish.
+                        self._cache_ui_task_info(
+                            request.task_info,
+                            'UPDATE_INSTRUCTION',
+                        )
                         with self._state_lock:
                             client = self.container_service_client
                         if client is not None:
@@ -1697,9 +1745,18 @@ class OrchestratorNode(Node):
                     elif request.command == SendCommand.Request.START_INFERENCE_RECORD:
                         self.get_logger().info(
                             'Starting recording during inference (forwarder)')
+                        self._cache_ui_task_info(
+                            request.task_info,
+                            'START_INFERENCE_RECORD',
+                        )
+                        record_task_info = self._get_inference_record_task_info()
+                        if record_task_info is None:
+                            response.success = False
+                            response.message = 'No inference task info available'
+                            return response
                         cd_result = self._forward_recording(
                             RecordingCommand.Request.START,
-                            task_info=request.task_info,
+                            task_info=record_task_info,
                             include_topics=True,
                         )
                         if (cd_result.success
@@ -2497,10 +2554,10 @@ class OrchestratorNode(Node):
         self.get_logger().error(f'Trigger CANCEL_SEGMENT failed: {message}')
 
     def _toggle_inference_trigger_recording(self, is_recording: bool) -> None:
-        task_info = self._prepared_inference_task_info
+        task_info = self._get_inference_record_task_info()
         if task_info is None:
             self.get_logger().warning(
-                'Inference trigger ignored: prepare the Inference record session first')
+                'Inference trigger ignored: no inference task info available')
             return
         if is_recording:
             self.get_logger().info('Trigger: STOP inference recording')
@@ -2542,10 +2599,10 @@ class OrchestratorNode(Node):
             self.get_logger().error(f'Trigger inference START failed: {message}')
 
     def _cancel_inference_trigger_recording(self) -> None:
-        task_info = self._prepared_inference_task_info
+        task_info = self._get_inference_record_task_info()
         if task_info is None:
             self.get_logger().warning(
-                'Inference trigger cancel ignored: prepare the Inference record session first')
+                'Inference trigger cancel ignored: no inference task info available')
             return
         self.get_logger().info('Trigger: CANCEL inference recording')
         cd_result = self._forward_recording(
@@ -2581,10 +2638,9 @@ class OrchestratorNode(Node):
                 self._snapshot_session_state()
             )
             if snapshot_on_inference:
-                if self._prepared_inference_task_info is None:
+                if self._get_inference_record_task_info() is None:
                     self.get_logger().warning(
-                        'Inference trigger ignored: prepare the Inference '
-                        'record session first')
+                        'Inference trigger ignored: no inference task info available')
                     return
                 if joystick_mode == 'right':
                     self._toggle_inference_trigger_recording(snapshot_on_recording)

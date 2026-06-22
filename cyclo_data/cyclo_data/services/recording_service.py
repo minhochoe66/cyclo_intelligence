@@ -266,6 +266,8 @@ class RecordingService:
         with self._session_lock:
             self._robot_type = robot_type
             existing = self._data_manager
+            if existing is not None and existing.is_recording():
+                return existing
         candidate = DataManager(
             save_root_path=self.DEFAULT_SAVE_ROOT_PATH,
             robot_type=robot_type,
