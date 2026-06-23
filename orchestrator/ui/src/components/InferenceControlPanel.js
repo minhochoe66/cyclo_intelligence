@@ -15,21 +15,27 @@
 // Author: Dongyun Kim
 
 import React, { useState, useEffect, useCallback, useRef } from 'react';
-import { useSelector, useDispatch } from 'react-redux';
+import { shallowEqual, useSelector, useDispatch } from 'react-redux';
 import clsx from 'clsx';
 import toast, { useToasterStore } from 'react-hot-toast';
 import {
   MdPlayArrow,
   MdStop,
   MdDeleteOutline,
-  MdFiberManualRecord,
-  MdSave,
   MdClose,
+  MdPrecisionManufacturing,
+  MdViewInAr,
+  MdWarningAmber,
 } from 'react-icons/md';
 import { useRosServiceCaller } from '../hooks/useRosServiceCaller';
 import Tooltip from './Tooltip';
-import { InferencePhase, RecordPhase } from '../constants/taskPhases';
-import { setInferenceStatus } from '../features/tasks/taskSlice';
+import { InferencePhase } from '../constants/taskPhases';
+import {
+  markLocalTaskInfoEdited,
+  selectInferenceTaskInfo,
+  setInferenceMode,
+  setInferenceStatus,
+} from '../features/tasks/taskSlice';
 import { requiresInstruction } from '../constants/policyCapabilities';
 import usePolicyBackendStatus, {
   getPolicyBackendReadiness,
@@ -37,7 +43,7 @@ import usePolicyBackendStatus, {
 
 const phaseGuideMessages = {
   [InferencePhase.READY]: 'Ready to start',
-  [InferencePhase.LOADING]: 'Loading model...',
+  [InferencePhase.LOADING]: 'Loading model / downloading assets...',
   [InferencePhase.INFERENCING]: 'Inferencing',
   [InferencePhase.PAUSED]: 'Paused',
 };
@@ -51,19 +57,36 @@ const buildRequiredFields = (serviceType, policyType) => {
 };
 
 const spinnerFrames = ['⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧'];
+const API_BASE = '/api';
+
+async function readJsonResponse(response) {
+  const text = await response.text();
+  if (!text) return {};
+  try {
+    return JSON.parse(text);
+  } catch {
+    return { detail: text };
+  }
+}
+
+function buildTrtStatusUrl(modelPath, enginePath) {
+  const params = new URLSearchParams();
+  params.set('model_path', modelPath);
+  if (enginePath) params.set('engine_path', enginePath);
+  return `${API_BASE}/backends/groot/trt/status?${params.toString()}`;
+}
 
 export default function InferenceControlPanel() {
   const dispatch = useDispatch();
-  const taskInfo = useSelector((state) => state.tasks.taskInfo);
+  const taskInfo = useSelector(selectInferenceTaskInfo, shallowEqual);
   const inferenceStatus = useSelector((state) => state.tasks.inferenceStatus);
-  const recordStatus = useSelector((state) => state.tasks.recordStatus);
   const rosHost = useSelector((state) => state.ros.rosHost);
 
   const [hovered, setHovered] = useState(null);
   const [pressed, setPressed] = useState(null);
-  const [localRecording, setLocalRecording] = useState(false);
   const [lastPolicyPath, setLastPolicyPath] = useState('');
   const [spinnerIndex, setSpinnerIndex] = useState(0);
+  const [pendingRobotDeployIntent, setPendingRobotDeployIntent] = useState(null);
 
   const { sendRecordCommand } = useRosServiceCaller();
 
@@ -75,13 +98,9 @@ export default function InferenceControlPanel() {
   const isLoading = phase === InferencePhase.LOADING;
   const isInferencing = phase === InferencePhase.INFERENCING;
   const isPaused = phase === InferencePhase.PAUSED;
+  const inferencePhaseRef = useRef(phase);
   const isModelLoaded = isInferencing || isPaused;
   const shouldCheckBackend = isIdle || isPaused;
-  const serverRecording =
-    recordStatus.recordPhase === RecordPhase.RECORDING ||
-    Boolean(recordStatus.running);
-  const isRecording = serverRecording || localRecording;
-  const isRecordingRef = useRef(isRecording);
 
   const {
     readiness: backendReadiness,
@@ -96,8 +115,8 @@ export default function InferenceControlPanel() {
     (backendReadiness.state === 'checking' || backendReadiness.state === 'warming');
 
   useEffect(() => {
-    isRecordingRef.current = isRecording;
-  }, [isRecording]);
+    inferencePhaseRef.current = phase;
+  }, [phase]);
 
   useEffect(() => {
     toasts
@@ -120,12 +139,6 @@ export default function InferenceControlPanel() {
     return () => clearInterval(id);
   }, [isLoading, isInferencing, isBackendWarming]);
 
-  useEffect(() => {
-    if (isIdle && isRecordingRef.current) {
-      setLocalRecording(false);
-    }
-  }, [isIdle]);
-
   const validateTaskInfo = useCallback(() => {
     const missingFields = [];
     const fields = buildRequiredFields(taskInfo.serviceType, taskInfo.policyType);
@@ -145,11 +158,57 @@ export default function InferenceControlPanel() {
     return { isValid: missingFields.length === 0, missingFields };
   }, [taskInfo]);
 
+  const ensureTensorRtReady = useCallback(async () => {
+    if (
+      taskInfo.serviceType !== 'groot' ||
+      taskInfo.accelerationMode !== 'tensorrt_dit'
+    ) {
+      return true;
+    }
+    const policyPath = String(taskInfo.policyPath || '').trim();
+    if (!policyPath) return true;
+    try {
+      const response = await fetch(buildTrtStatusUrl(
+        policyPath,
+        String(taskInfo.accelerationEnginePath || '').trim()
+      ));
+      const data = await readJsonResponse(response);
+      if (!response.ok) {
+        throw new Error(data.detail || data.message || `status failed (${response.status})`);
+      }
+      if (data.status === 'ready') return true;
+      toast.error(
+        data.status === 'building'
+          ? 'TRT engine is still building'
+          : 'Build TRT engine before starting inference'
+      );
+      return false;
+    } catch (error) {
+      toast.error(`TRT engine status failed: ${error.message}`);
+      return false;
+    }
+  }, [
+    taskInfo.serviceType,
+    taskInfo.accelerationMode,
+    taskInfo.policyPath,
+    taskInfo.accelerationEnginePath,
+  ]);
+
   const executeCommand = useCallback(
-    async (commandName, commandString) => {
+    async (commandName, commandString, options = {}) => {
+      const isStartTimeoutDuringLoading = (message = '') => (
+        commandString === 'start_inference' &&
+        String(message).toLowerCase().includes('timeout') &&
+        inferencePhaseRef.current === InferencePhase.LOADING
+      );
+
       try {
-        const result = await sendRecordCommand(commandString);
+        const result = await sendRecordCommand(commandString, options);
         if (result && result.success === false) {
+          if (isStartTimeoutDuringLoading(result.message)) {
+            toast('Model loading is still running. Large downloads can take several minutes.');
+            return result;
+          }
           toast.error(`Command failed: ${result.message || 'Unknown error'}`);
           // Backend may have left phase in LOADING/INFERENCING after a failed
           // setup; force the local phase back to READY so the panel becomes
@@ -169,6 +228,12 @@ export default function InferenceControlPanel() {
           errorMessage.includes('WebSocket')
         ) {
           toast.error(`ROS connection failed: rosbridge server is not running (${rosHost})`);
+        } else if (isStartTimeoutDuringLoading(errorMessage)) {
+          toast('Model loading is still running. Large downloads can take several minutes.');
+          return {
+            success: true,
+            message: 'Model loading is still running',
+          };
         } else if (errorMessage.includes('timeout')) {
           toast.error(`Command timeout [${commandName}]: Server did not respond`);
         } else {
@@ -181,6 +246,16 @@ export default function InferenceControlPanel() {
     },
     [sendRecordCommand, rosHost, dispatch]
   );
+
+  const executeStartIntent = useCallback(async (intent, inferenceMode) => {
+    if (!intent) return;
+    if (intent.policyPath) {
+      setLastPolicyPath(intent.policyPath);
+    }
+    await executeCommand(intent.commandName, intent.commandString, {
+      inferenceMode,
+    });
+  }, [executeCommand]);
 
   const handleStart = useCallback(async () => {
     let readiness = backendReadiness;
@@ -198,65 +273,82 @@ export default function InferenceControlPanel() {
       return;
     }
 
+    let startIntent;
     if (isPaused && taskInfo.policyPath === lastPolicyPath) {
-      await executeCommand('Resume', 'resume_inference');
+      startIntent = {
+        commandName: 'Resume',
+        commandString: 'resume_inference',
+        policyPath: '',
+      };
     } else {
       const validation = validateTaskInfo();
       if (!validation.isValid) {
         toast.error(`Missing required fields: ${validation.missingFields.join(', ')}`);
         return;
       }
-      setLastPolicyPath(taskInfo.policyPath);
-      await executeCommand('Start Inference', 'start_inference');
+      startIntent = {
+        commandName: 'Start Inference',
+        commandString: 'start_inference',
+        policyPath: taskInfo.policyPath,
+      };
     }
+
+    if (
+      startIntent.commandString === 'start_inference' &&
+      !(await ensureTensorRtReady())
+    ) {
+      return;
+    }
+
+    const inferenceMode = taskInfo.inferenceMode || 'simulation';
+    if (inferenceMode === 'robot') {
+      setPendingRobotDeployIntent(startIntent);
+      return;
+    }
+
+    await executeStartIntent(startIntent, 'simulation');
   }, [
     backendReadiness,
     refreshBackendStatus,
     isPaused,
     taskInfo.policyPath,
+    taskInfo.inferenceMode,
     lastPolicyPath,
-    executeCommand,
+    executeStartIntent,
+    ensureTensorRtReady,
     validateTaskInfo,
   ]);
+
+  const handleConfirmRobotDeploy = useCallback(async () => {
+    const intent = pendingRobotDeployIntent;
+    setPendingRobotDeployIntent(null);
+    await executeStartIntent(intent, 'robot');
+  }, [executeStartIntent, pendingRobotDeployIntent]);
+
+  const handleUseSimDeploy = useCallback(async () => {
+    const intent = pendingRobotDeployIntent;
+    setPendingRobotDeployIntent(null);
+    dispatch(setInferenceMode('simulation'));
+    dispatch(markLocalTaskInfoEdited({ source: 'inference' }));
+    await executeStartIntent(intent, 'simulation');
+  }, [dispatch, executeStartIntent, pendingRobotDeployIntent]);
+
+  const handleCloseRobotDeployWarning = useCallback(() => {
+    setPendingRobotDeployIntent(null);
+  }, []);
 
   const handleStop = useCallback(async () => {
     await executeCommand('Stop', 'stop_inference');
   }, [executeCommand]);
 
   const handleClear = useCallback(async () => {
-    if (isRecording) {
-      await executeCommand('Cancel Recording', 'cancel_inference_record');
-      setLocalRecording(false);
-    }
     await executeCommand('Clear', 'finish');
     setLastPolicyPath('');
-  }, [executeCommand, isRecording]);
-
-  const handleRecordStart = useCallback(async () => {
-    const result = await executeCommand('Record Start', 'start_inference_record');
-    if (result && result.success) {
-      setLocalRecording(true);
-    }
-  }, [executeCommand]);
-
-  const handleRecordSave = useCallback(async () => {
-    const result = await executeCommand('Record Save', 'stop_inference_record');
-    if (result && result.success) {
-      setLocalRecording(false);
-    }
-  }, [executeCommand]);
-
-  const handleRecordDiscard = useCallback(async () => {
-    const result = await executeCommand('Record Discard', 'cancel_inference_record');
-    if (result && result.success) {
-      setLocalRecording(false);
-    }
   }, [executeCommand]);
 
   const startEnabled = shouldCheckBackend && backendReadiness.ready;
   const stopEnabled = isInferencing;
   const clearEnabled = isModelLoaded;
-  const recordEnabled = isModelLoaded && !isRecording && !!taskInfo.recordInferenceMode;
   const startDescription = isBackendStartBlocked
     ? backendReadiness.message
     : isPaused
@@ -282,15 +374,9 @@ export default function InferenceControlPanel() {
       if (e.key === 'Escape') {
         if (clearEnabled) return 'Clear';
       }
-      if (e.key === 'r' || e.key === 'R') {
-        if (!e.ctrlKey && !e.metaKey && !e.altKey) {
-          if (isRecording) return 'RecordSave';
-          if (recordEnabled) return 'RecordStart';
-        }
-      }
       return null;
     },
-    [startEnabled, stopEnabled, clearEnabled, recordEnabled, isRecording]
+    [startEnabled, stopEnabled, clearEnabled]
   );
 
   useEffect(() => {
@@ -318,8 +404,6 @@ export default function InferenceControlPanel() {
       if (action === 'Start') handleStart();
       else if (action === 'Stop') handleStop();
       else if (action === 'Clear') handleClear();
-      else if (action === 'RecordStart') handleRecordStart();
-      else if (action === 'RecordSave') handleRecordSave();
     };
 
     window.addEventListener('keydown', handleKeyDown);
@@ -328,7 +412,7 @@ export default function InferenceControlPanel() {
       window.removeEventListener('keydown', handleKeyDown);
       window.removeEventListener('keyup', handleKeyUp);
     };
-  }, [handleKeyAction, handleStart, handleStop, handleClear, handleRecordStart, handleRecordSave]);
+  }, [handleKeyAction, handleStart, handleStop, handleClear]);
 
   const classBody = clsx(
     'bg-white/90',
@@ -369,30 +453,6 @@ export default function InferenceControlPanel() {
       }
     );
 
-  const classRecBtn = (variant, isDisabled) =>
-    clsx(
-      'h-full',
-      'rounded-lg',
-      'border-none',
-      'cursor-pointer',
-      'px-2.5',
-      'flex',
-      'items-center',
-      'justify-center',
-      'gap-1',
-      'font-semibold',
-      'text-lg',
-      'transition-all',
-      'duration-150',
-      'shrink-0',
-      {
-        'bg-red-500 text-white hover:bg-red-600': variant === 'record' && !isDisabled,
-        'bg-green-500 text-white hover:bg-green-600': variant === 'save',
-        'bg-gray-500 text-white hover:bg-gray-600': variant === 'discard',
-        'opacity-30 cursor-not-allowed bg-gray-200 text-gray-400': isDisabled,
-      }
-    );
-
   const controlButtons = [
     {
       label: 'Start',
@@ -424,137 +484,120 @@ export default function InferenceControlPanel() {
   ];
 
   return (
-    <div className={classBody}>
-      <span className="text-lg font-semibold text-gray-500 whitespace-nowrap px-1 shrink-0">Inference</span>
-      <div className="w-px h-2/3 bg-gray-300 shrink-0"></div>
-      {controlButtons.map(({ label, icon: Icon, color, enabled, handler, description, shortcut }) => {
-        const isDisabled = !enabled;
-        return (
-          <Tooltip
-            key={label}
-            position="bottom"
-            content={
-              <div className="text-center">
-                <div className="font-semibold">{description}</div>
-                {!isDisabled && (
-                  <div className="text-sm mt-1 text-gray-300">
-                    <span className="font-mono bg-gray-700 px-1 rounded">{shortcut}</span>
-                  </div>
-                )}
-              </div>
-            }
-            disabled={false}
-            className="relative h-full shrink-0"
-          >
-            <button
-              className={classBtn(label, isDisabled)}
-              onClick={() => !isDisabled && handler()}
-              onMouseEnter={() => !isDisabled && setHovered(label)}
-              onMouseLeave={() => { setHovered(null); setPressed(null); }}
-              onMouseDown={() => !isDisabled && setPressed(label)}
-              onMouseUp={() => setPressed(null)}
-              disabled={isDisabled}
-              aria-label={description}
-            >
-              <Icon
-                style={{ fontSize: '1.1rem' }}
-                color={isDisabled ? '#9ca3af' : color}
-              />
-              {label}
-            </button>
-          </Tooltip>
-        );
-      })}
-
-      <div className="w-px h-2/3 bg-gray-400 shrink-0"></div>
-
-      {!isRecording ? (
-        <Tooltip
-          position="bottom"
-          content={
-            <div className="text-center">
-              <div className="font-semibold">Start recording</div>
-              <div className="text-sm mt-1 text-gray-300">
-                <span className="font-mono bg-gray-700 px-1 rounded">R</span>
-              </div>
-            </div>
-          }
-          disabled={!recordEnabled}
-          className="relative h-full shrink-0"
-        >
-          <button
-            className={classRecBtn('record', !recordEnabled)}
-            onClick={() => recordEnabled && handleRecordStart()}
-            disabled={!recordEnabled}
-            aria-label="Start recording"
-          >
-            <MdFiberManualRecord style={{ fontSize: '0.8rem' }} />
-            Record
-          </button>
-        </Tooltip>
-      ) : (
-        <>
-          <div className="flex items-center gap-0.5 text-red-500 font-bold text-lg animate-pulse shrink-0">
-            <MdFiberManualRecord style={{ fontSize: '0.5rem' }} />
-            REC
-          </div>
-          <Tooltip
-            position="bottom"
-            content={
-              <div className="text-center">
-                <div className="font-semibold">Save recording</div>
-                <div className="text-sm mt-1 text-gray-300">
-                  <span className="font-mono bg-gray-700 px-1 rounded">R</span>
+    <>
+      <div className={classBody}>
+        <span className="text-lg font-semibold text-gray-500 whitespace-nowrap px-1 shrink-0">Inference</span>
+        <div className="w-px h-2/3 bg-gray-300 shrink-0"></div>
+        {controlButtons.map(({ label, icon: Icon, color, enabled, handler, description, shortcut }) => {
+          const isDisabled = !enabled;
+          return (
+            <Tooltip
+              key={label}
+              position="bottom"
+              content={
+                <div className="text-center">
+                  <div className="font-semibold">{description}</div>
+                  {!isDisabled && (
+                    <div className="text-sm mt-1 text-gray-300">
+                      <span className="font-mono bg-gray-700 px-1 rounded">{shortcut}</span>
+                    </div>
+                  )}
                 </div>
-              </div>
-            }
-            className="relative h-full shrink-0"
-          >
-            <button
-              className={classRecBtn('save', false)}
-              onClick={handleRecordSave}
-              aria-label="Save recording"
+              }
+              disabled={false}
+              className="relative h-full shrink-0"
             >
-              <MdSave style={{ fontSize: '1rem' }} />
-              Save
-            </button>
-          </Tooltip>
-          <Tooltip
-            position="bottom"
-            content={
-              <div className="text-center">
-                <div className="font-semibold">Discard recording</div>
-              </div>
-            }
-            className="relative h-full shrink-0"
-          >
-            <button
-              className={classRecBtn('discard', false)}
-              onClick={handleRecordDiscard}
-              aria-label="Discard recording"
-            >
-              <MdClose style={{ fontSize: '1rem' }} />
-              Discard
-            </button>
-          </Tooltip>
-        </>
-      )}
+              <button
+                className={classBtn(label, isDisabled)}
+                onClick={() => !isDisabled && handler()}
+                onMouseEnter={() => !isDisabled && setHovered(label)}
+                onMouseLeave={() => { setHovered(null); setPressed(null); }}
+                onMouseDown={() => !isDisabled && setPressed(label)}
+                onMouseUp={() => setPressed(null)}
+                disabled={isDisabled}
+                aria-label={description}
+              >
+                <Icon
+                  style={{ fontSize: '1.1rem' }}
+                  color={isDisabled ? '#9ca3af' : color}
+                />
+                {label}
+              </button>
+            </Tooltip>
+          );
+        })}
 
-      {(guideMessage || showGuideSpinner) && (
-        <>
-          <div className="w-px h-2/3 bg-gray-400 shrink-0"></div>
-          <div className="flex items-center gap-1 shrink-0">
-            <span className="text-gray-600 font-semibold text-lg whitespace-nowrap">
-              {guideMessage}
-            </span>
-            {showGuideSpinner && (
-              <span className="font-mono text-blue-500 text-sm">
-                {spinnerFrames[spinnerIndex]}
+        {(guideMessage || showGuideSpinner) && (
+          <>
+            <div className="w-px h-2/3 bg-gray-400 shrink-0"></div>
+            <div className="flex items-center gap-1 shrink-0">
+              <span className="text-gray-600 font-semibold text-lg whitespace-nowrap">
+                {guideMessage}
               </span>
-            )}
+              {showGuideSpinner && (
+                <span className="font-mono text-blue-500 text-sm">
+                  {spinnerFrames[spinnerIndex]}
+                </span>
+              )}
+            </div>
+          </>
+        )}
+      </div>
+
+      {pendingRobotDeployIntent && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/45 px-4">
+          <div
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="real-robot-deploy-title"
+            className="w-full max-w-md rounded-lg bg-white shadow-2xl border border-orange-200 overflow-hidden"
+          >
+            <div className="flex items-center justify-between gap-3 px-4 py-3 bg-orange-50 border-b border-orange-200">
+              <div className="flex items-center gap-2 min-w-0">
+                <MdWarningAmber className="text-orange-600 shrink-0" size={22} />
+                <h2 id="real-robot-deploy-title" className="text-base font-bold text-orange-900 truncate">
+                  Real Robot Deploy
+                </h2>
+              </div>
+              <button
+                type="button"
+                onClick={handleCloseRobotDeployWarning}
+                className="w-8 h-8 rounded-md flex items-center justify-center text-orange-700 hover:bg-orange-100 focus:outline-none focus:ring-2 focus:ring-orange-300"
+                aria-label="Close deploy warning"
+              >
+                <MdClose size={20} />
+              </button>
+            </div>
+            <div className="px-4 py-4 text-sm text-gray-700 space-y-3">
+              <p className="font-semibold text-gray-900">
+                Real Robot Deploy sends policy actions to the physical robot.
+              </p>
+              <p>
+                Keep people clear of the robot workspace before continuing.
+                For first-time inference, test with 3D Sim Deploy before switching to Real Robot Deploy.
+              </p>
+            </div>
+            <div className="flex flex-col sm:flex-row gap-2 px-4 py-3 bg-gray-50 border-t border-gray-200">
+              <button
+                type="button"
+                onClick={handleConfirmRobotDeploy}
+                className="flex-1 h-10 rounded-md bg-orange-600 text-white font-semibold hover:bg-orange-700 focus:outline-none focus:ring-2 focus:ring-orange-300 flex items-center justify-center gap-1.5"
+              >
+                <MdPrecisionManufacturing size={18} />
+                Real Robot Deploy
+              </button>
+              <button
+                type="button"
+                onClick={handleUseSimDeploy}
+                className="flex-1 h-10 rounded-md bg-emerald-600 text-white font-semibold hover:bg-emerald-700 focus:outline-none focus:ring-2 focus:ring-emerald-300 flex items-center justify-center gap-1.5"
+              >
+                <MdViewInAr size={18} />
+                3D Sim Deploy
+              </button>
+            </div>
           </div>
-        </>
+        </div>
       )}
-    </div>
+    </>
   );
 }

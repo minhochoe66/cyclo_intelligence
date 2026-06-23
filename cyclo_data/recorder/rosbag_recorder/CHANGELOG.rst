@@ -1,6 +1,27 @@
-^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 Changelog for package rosbag_recorder
-^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+0.1.16 (2026-06-23)
+-------------------
+* None
+
+0.1.15 (2026-06-22)
+-------------------
+* Allowed recording to start with currently available topics while unavailable topics remain visible through monitor warnings.
+* Contributors: Taehyeong Kim
+
+0.1.14 (2026-06-17)
+-------------------
+* None
+
+0.1.13 (2026-06-11)
+-------------------
+* None
+
+0.1.12 (2026-06-05)
+-------------------
+* None
 
 0.1.11 (2026-06-05)
 -------------------
@@ -50,4 +71,4 @@ Changelog for package rosbag_recorder
 ------------------
 * Initial open-source release of the Cyclo Intelligence rosbag recorder service.
 * Added ROS 2 services for preparing, starting, stopping, deleting, and finishing rosbag2 recordings.
-* Contributors: ROBOTIS
+* Contributors: Taehyeong Kim

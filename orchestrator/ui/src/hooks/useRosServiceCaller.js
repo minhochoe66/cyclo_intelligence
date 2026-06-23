@@ -15,7 +15,7 @@
 // Author: Kiwoong Park
 
 import { useCallback, useRef, useEffect } from 'react';
-import { useSelector } from 'react-redux';
+import { shallowEqual, useSelector } from 'react-redux';
 import ROSLIB from 'roslib';
 import PageType from '../constants/pageType';
 import TaskCommand from '../constants/taskCommand';
@@ -23,9 +23,47 @@ import TrainingCommand from '../constants/trainingCommand';
 import EditDatasetCommand from '../constants/commands';
 import rosConnectionManager from '../utils/rosConnectionManager';
 import { DEFAULT_PATHS } from '../constants/paths';
+import {
+  selectInferenceTaskInfo,
+  selectRecordTaskInfo,
+} from '../features/tasks/taskSlice';
+
+const DEFAULT_SERVICE_TIMEOUT_MS = 10000;
+const START_INFERENCE_SERVICE_TIMEOUT_MS = 30000;
+const NO_SERVICE_TIMEOUT_MS = 0;
+
+const LONG_RECORDING_COMMANDS = new Set([
+  'stop',
+  'next',
+  'rerecord',
+  'finish',
+  'cancel',
+  'skip_task',
+  'stop_segment',
+  'cancel_segment',
+  'discard_segment',
+  'finish_episode',
+  'discard_episode',
+  'stop_inference_record',
+  'cancel_inference_record',
+]);
+
+export function getRecordCommandServiceTimeoutMs(command, options = {}) {
+  const override = Number(options.serviceTimeoutMs || 0);
+  if (override > 0) {
+    return override;
+  }
+  if (LONG_RECORDING_COMMANDS.has(command)) {
+    return NO_SERVICE_TIMEOUT_MS;
+  }
+  return command === 'start_inference'
+    ? START_INFERENCE_SERVICE_TIMEOUT_MS
+    : DEFAULT_SERVICE_TIMEOUT_MS;
+}
 
 export function useRosServiceCaller() {
-  const taskInfo = useSelector((state) => state.tasks.taskInfo);
+  const recordTaskInfo = useSelector(selectRecordTaskInfo, shallowEqual);
+  const inferenceTaskInfo = useSelector(selectInferenceTaskInfo, shallowEqual);
   const trainingInfo = useSelector((state) => state.training.trainingInfo);
   const trainingResumePolicyPath = useSelector((state) => state.training.resumePolicyPath);
   const editDatasetInfo = useSelector((state) => state.editDataset);
@@ -40,12 +78,16 @@ export function useRosServiceCaller() {
   // useEffect — most painfully Record/InferencePage's mount-time
   // `sendRecordCommand('refresh_topics')`, which then tears down and
   // re-prepares all rosbag subscriptions per keystroke.
-  const taskInfoRef = useRef(taskInfo);
+  const recordTaskInfoRef = useRef(recordTaskInfo);
+  const inferenceTaskInfoRef = useRef(inferenceTaskInfo);
   const trainingInfoRef = useRef(trainingInfo);
   const trainingResumePolicyPathRef = useRef(trainingResumePolicyPath);
   const editDatasetInfoRef = useRef(editDatasetInfo);
   const pageRef = useRef(page);
-  useEffect(() => { taskInfoRef.current = taskInfo; }, [taskInfo]);
+  useEffect(() => { recordTaskInfoRef.current = recordTaskInfo; }, [recordTaskInfo]);
+  useEffect(() => {
+    inferenceTaskInfoRef.current = inferenceTaskInfo;
+  }, [inferenceTaskInfo]);
   useEffect(() => { trainingInfoRef.current = trainingInfo; }, [trainingInfo]);
   useEffect(() => {
     trainingResumePolicyPathRef.current = trainingResumePolicyPath;
@@ -54,7 +96,7 @@ export function useRosServiceCaller() {
   useEffect(() => { pageRef.current = page; }, [page]);
 
   const callService = useCallback(
-    async (serviceName, serviceType, request, timeoutMs = 10000) => {
+    async (serviceName, serviceType, request, timeoutMs = DEFAULT_SERVICE_TIMEOUT_MS) => {
       try {
         console.log(`Attempting to call service: ${serviceName}`);
         const ros = await rosConnectionManager.getConnection(rosbridgeUrl);
@@ -65,33 +107,56 @@ export function useRosServiceCaller() {
         }
 
         return new Promise((resolve, reject) => {
-          const service = new ROSLIB.Service({
-            ros,
-            name: serviceName,
-            serviceType: serviceType,
-          });
           const req = new ROSLIB.ServiceRequest(request);
+          const serviceCallId = `call_service:${serviceName}:${++ros.idCounter}`;
+          let settled = false;
+          let serviceTimeout;
 
-          // Set a timeout for the service call
-          const serviceTimeout = setTimeout(() => {
-            reject(new Error(`Service call timeout for ${serviceName}`));
-          }, timeoutMs);
+          const finish = (handler) => {
+            if (settled) return;
+            settled = true;
+            clearTimeout(serviceTimeout);
+            handler();
+          };
 
-          service.callService(
-            req,
-            (result) => {
-              clearTimeout(serviceTimeout);
+          // Set a local guard only for finite-timeout calls. Long recording
+          // saves pass timeout=0 through rosbridge so the service response can
+          // arrive whenever the storage backend actually finishes.
+          if (timeoutMs > 0) {
+            serviceTimeout = setTimeout(() => {
+              finish(() => reject(new Error(`Service call timeout for ${serviceName}`)));
+            }, timeoutMs + 5000);
+          }
+
+          ros.once(serviceCallId, (message) => {
+            if (message.result !== undefined && message.result === false) {
+              finish(() => {
+                const error = message.values;
+                console.error('Service call failed:', error);
+                reject(
+                  new Error(`Service call failed for ${serviceName}: ${error.message || error}`)
+                );
+              });
+              return;
+            }
+
+            finish(() => {
+              const result = typeof ROSLIB.ServiceResponse === 'function'
+                ? new ROSLIB.ServiceResponse(message.values)
+                : (message.values || {});
               console.log('Service call successful:', result);
               resolve(result);
-            },
-            (error) => {
-              clearTimeout(serviceTimeout);
-              console.error('Service call failed:', error);
-              reject(
-                new Error(`Service call failed for ${serviceName}: ${error.message || error}`)
-              );
-            }
-          );
+            });
+          });
+
+          ros.callOnConnection({
+            op: 'call_service',
+            id: serviceCallId,
+            service: serviceName,
+            type: serviceType,
+            args: req,
+            timeout: timeoutMs > 0 ? timeoutMs / 1000 : 0,
+          });
         });
       } catch (error) {
         console.error('Failed to establish ROS connection for service call:', error);
@@ -107,8 +172,10 @@ export function useRosServiceCaller() {
     async (command, options = {}) => {
       // Read latest values from refs at call time so this callback's
       // identity stays stable across taskInfo / page mutations.
-      const taskInfo = taskInfoRef.current;
       const page = pageRef.current;
+      const taskInfo = page === PageType.INFERENCE
+        ? inferenceTaskInfoRef.current
+        : recordTaskInfoRef.current;
       try {
         let command_enum;
         switch (command) {
@@ -199,7 +266,10 @@ export function useRosServiceCaller() {
           taskType = 'inference';
         }
 
-        // Auto-fill taskName and taskInstruction if empty
+        // Auto-fill taskName and taskInstruction if empty. Inference-page
+        // autosync can opt out so clearing the language prompt propagates as
+        // empty instead of being replaced by a generated task name.
+        const autofillEmptyTaskFields = options.autofillEmptyTaskFields !== false;
         let taskName = taskInfo.taskName || '';
         let taskInstruction = (taskInfo.taskInstruction || []).filter(
           (instruction) => instruction.trim() !== ''
@@ -215,13 +285,13 @@ export function useRosServiceCaller() {
           ? rawSubtaskInstruction
           : rawSubtaskInstruction.filter((instruction) => instruction.trim() !== '');
 
-        if (!taskName.trim()) {
+        if (!taskName.trim() && autofillEmptyTaskFields) {
           const now = new Date();
           const pad = (n) => String(n).padStart(2, '0');
           const yy = String(now.getFullYear()).slice(2);
           taskName = `task_${yy}${pad(now.getMonth() + 1)}${pad(now.getDate())}${pad(now.getHours())}${pad(now.getMinutes())}`;
         }
-        if (taskInstruction.length === 0) {
+        if (taskInstruction.length === 0 && autofillEmptyTaskFields) {
           taskInstruction = [taskName];
         }
 
@@ -238,7 +308,19 @@ export function useRosServiceCaller() {
           (k) => Number(cameraRotations[k] || 0),
         );
         const imageResize = options.imageResize || null;
-
+        const inferenceMode = options.inferenceMode || taskInfo.inferenceMode || 'simulation';
+        const policyPath = String(taskInfo.policyPath || '').trim();
+        const accelerationMode = taskInfo.serviceType === 'groot'
+          ? String(taskInfo.accelerationMode || 'pytorch').trim()
+          : 'pytorch';
+        const accelerationEnginePath = taskInfo.serviceType === 'groot'
+          ? String(taskInfo.accelerationEnginePath || '').trim()
+          : '';
+        const actionRequestMode = (
+          String(taskInfo.actionRequestMode || '').trim().toLowerCase() === 'sync'
+            ? 'sync'
+            : 'async'
+        );
         const request = {
           task_info: {
             task_num: String(taskInfo.taskNum ?? ''),
@@ -246,9 +328,9 @@ export function useRosServiceCaller() {
             task_type: String(taskType),
             task_instruction: taskInstruction,
             subtask_instruction: subtaskInstruction,
-            policy_path: String(taskInfo.policyPath || ''),
+            policy_path: policyPath,
             record_inference_mode: Boolean(taskInfo.recordInferenceMode),
-            tags: [],
+            tags: [`inference_mode:${inferenceMode}`],
             control_hz: Number(taskInfo.controlHz || 100),
             inference_hz: Number(taskInfo.inferenceHz || 15),
             chunk_align_window_s: Number(
@@ -258,6 +340,10 @@ export function useRosServiceCaller() {
             ),
             include_robotis_license: Boolean(taskInfo.includeRobotisLicense),
             service_type: String(taskInfo.serviceType || ''),
+            inference_mode: String(inferenceMode),
+            action_request_mode: actionRequestMode,
+            acceleration_mode: accelerationMode || 'pytorch',
+            acceleration_engine_path: accelerationEnginePath,
           },
           command: Number(command_enum),
           segment_index: Number(options.segmentIndex || 0),
@@ -280,10 +366,12 @@ export function useRosServiceCaller() {
         console.log('request:', request);
 
         console.log(`Sending command '${command}' (${command_enum}) to service`);
+        const serviceTimeoutMs = getRecordCommandServiceTimeoutMs(command, options);
         const result = await callService(
           '/task/command',
           'interfaces/srv/SendCommand',
-          request
+          request,
+          serviceTimeoutMs
         );
 
         console.log(`Service response for command '${command}':`, result);

@@ -32,6 +32,7 @@ import os
 import sys
 import tempfile
 import time
+import ast
 from typing import Optional
 
 import cv2
@@ -50,6 +51,12 @@ import gr00t.model  # noqa: F401 - register custom models
 from gr00t.data.embodiment_tags import EmbodimentTag  # noqa: E402
 from gr00t.policy.gr00t_policy import Gr00tPolicy  # noqa: E402
 from robot_client import RobotClient  # noqa: E402
+from robot_client.camera_mapping import resolve_camera_feature_sources  # noqa: E402
+
+try:
+    from hf_token_sync import sync_token_file  # noqa: E402
+except Exception:  # pragma: no cover - helper is mounted in policy containers.
+    sync_token_file = None
 
 
 def _env_flag(name: str, default: bool = False) -> bool:
@@ -57,6 +64,33 @@ def _env_flag(name: str, default: bool = False) -> bool:
     if value is None:
         return default
     return value.strip().lower() in {"1", "true", "yes", "on"}
+
+
+def _env_int(name: str, default: int) -> int:
+    value = os.environ.get(name)
+    if value is None:
+        return default
+    try:
+        parsed = int(value)
+    except ValueError:
+        logging.getLogger("groot_inference").warning(
+            "Ignoring invalid %s=%r; using %s",
+            name,
+            value,
+            default,
+        )
+        return default
+    return parsed if parsed > 0 else default
+
+
+ACCELERATION_PYTORCH = "pytorch"
+ACCELERATION_TENSORRT_DIT = "tensorrt_dit"
+ACCELERATION_TENSORRT_FULL_PIPELINE = "tensorrt_full_pipeline"
+SUPPORTED_ACCELERATION_MODES = {
+    ACCELERATION_PYTORCH,
+    ACCELERATION_TENSORRT_DIT,
+    ACCELERATION_TENSORRT_FULL_PIPELINE,
+}
 
 # Add GR00T root to sys.path for deployment script imports.
 # After the move into runtime/, parents[0]=runtime, parents[1]=groot,
@@ -90,7 +124,12 @@ except ImportError:  # GR00T N1.6 / N1.6.1
     )
 
 
-def build_trt_engine(policy: Gr00tPolicy, observation: dict, engine_path: str):
+def build_trt_engine(
+    policy: Gr00tPolicy,
+    observation: dict,
+    engine_path: str,
+    workspace_mb: Optional[int] = None,
+):
     """Export DiT to ONNX and build TensorRT engine automatically.
 
     Uses DiTInputCapture and export_dit_to_onnx from GR00T deployment scripts,
@@ -104,6 +143,8 @@ def build_trt_engine(policy: Gr00tPolicy, observation: dict, engine_path: str):
 
     logger = logging.getLogger("groot_inference")
     engine_dir = os.path.dirname(engine_path)
+    if workspace_mb is None:
+        workspace_mb = _env_int("GROOT_TRT_WORKSPACE_MB", 4096)
 
     # Step 1: Capture DiT input shapes via hook
     logger.info("Capturing DiT input shapes...")
@@ -171,7 +212,7 @@ def build_trt_engine(policy: Gr00tPolicy, observation: dict, engine_path: str):
             onnx_path=onnx_path,
             engine_path=engine_path,
             precision="bf16",
-            workspace_mb=8192,
+            workspace_mb=workspace_mb,
             min_shapes=min_shapes,
             opt_shapes=opt_shapes,
             max_shapes=max_shapes,
@@ -184,7 +225,6 @@ class GR00TInference:
     """Encapsulates GR00T policy loading, observation building, and inference."""
 
     logger = logging.getLogger("groot_inference")
-    IMAGE_SIZE = (256, 256)
     DEFAULT_EMBODIMENT_TAG = "new_embodiment"
     ROTATE_MAP = {
         90: cv2.ROTATE_90_CLOCKWISE,
@@ -196,6 +236,8 @@ class GR00TInference:
         self.policy: Optional[Gr00tPolicy] = None
         self.robot: Optional[RobotClient] = None
         self._loaded_model_path: Optional[str] = None  # track cached policy path
+        self._loaded_acceleration_mode: str = ACCELERATION_PYTORCH
+        self._loaded_acceleration_engine_path: str = ""
         self.policy_info: dict = {
             "video": [],       # e.g. ["cam_left_head", "cam_left_wrist", ...]
             "state": [],       # e.g. ["arm_left", "arm_right"]
@@ -223,10 +265,28 @@ class GR00TInference:
         robot_type = request.robot_type
 
         try:
+            acceleration_mode, acceleration_engine_path, strict_acceleration = (
+                self._resolve_acceleration_request(request, model_path)
+            )
+            if acceleration_mode == ACCELERATION_TENSORRT_FULL_PIPELINE:
+                raise RuntimeError(
+                    "acceleration_mode=tensorrt_full_pipeline is not wired into "
+                    "Cyclo GR00T runtime yet; use tensorrt_dit or pytorch"
+                )
+
             # Reuse cached policy if the same model is already loaded.
             # Only reload robot client (subscribers) on restart.
-            if self.policy is not None and self._loaded_model_path == model_path:
-                self.logger.info("Reusing cached policy: %s", model_path)
+            if (
+                self.policy is not None
+                and self._loaded_model_path == model_path
+                and self._loaded_acceleration_mode == acceleration_mode
+                and self._loaded_acceleration_engine_path == acceleration_engine_path
+            ):
+                self.logger.info(
+                    "Reusing cached policy: %s (acceleration=%s)",
+                    model_path,
+                    acceleration_mode,
+                )
                 if self.robot is not None:
                     self.robot.close()
                     self.robot = None
@@ -239,47 +299,55 @@ class GR00TInference:
                     "action_keys": list(self.policy_info["action"]),
                 }
 
-            self.logger.info("Loading GR00T policy from: %s", model_path)
+            if self.policy is not None:
+                self.logger.info(
+                    "Reloading GR00T policy due to model/runtime change "
+                    "(model=%s, acceleration=%s)",
+                    model_path,
+                    acceleration_mode,
+                )
+                if self.robot is not None:
+                    self.robot.close()
+                    self.robot = None
+                self.policy = None
+                self._loaded_model_path = None
+                self._loaded_acceleration_mode = ACCELERATION_PYTORCH
+                self._loaded_acceleration_engine_path = ""
+
+            self.logger.info(
+                "Loading GR00T policy from: %s (acceleration=%s)",
+                model_path,
+                acceleration_mode,
+            )
+            self._sync_hf_token_for_gated_backbones()
 
             self.policy = Gr00tPolicy(
                 embodiment_tag=EmbodimentTag.NEW_EMBODIMENT,
                 model_path=model_path,
                 device="cuda",
             )
-            self._loaded_model_path = model_path
 
             self.init_policy_info()
             self.init_robot_info(robot_type)
             self.robot.wait_for_ready(timeout=10.0)
 
-            # TensorRT acceleration for DiT (Action Head).
-            # Keep this opt-in while validating N1.7 model-load/action flow;
-            # ONNX/TRT export writes into the checkpoint directory.
-            if _env_flag("GROOT_TRT_ENABLED", default=False):
-                trt_path = os.path.join(model_path, "dit_model_bf16.trt")
-                try:
-                    if not os.path.exists(trt_path):
-                        self.logger.info("No TRT engine found, building automatically...")
-                        dummy_obs = self._build_dummy_observation(request.task_instruction)
-                        if dummy_obs.get("success") is False:
-                            raise RuntimeError(
-                                f"cannot build TRT without a valid observation: "
-                                f"{dummy_obs.get('message')}"
-                            )
-                        build_trt_engine(self.policy, dummy_obs, trt_path)
-
-                    replace_dit_with_tensorrt(self.policy, trt_path)
-                    self.logger.info("DiT accelerated with TensorRT: %s", trt_path)
-                except Exception as e:
-                    self.logger.warning(
-                        "TensorRT acceleration unavailable, using PyTorch Eager: %s", e
-                    )
+            if acceleration_mode == ACCELERATION_TENSORRT_DIT:
+                trt_applied = self._enable_dit_tensorrt(
+                    request=request,
+                    engine_path=acceleration_engine_path,
+                    strict=strict_acceleration,
+                )
+                if not trt_applied:
+                    acceleration_mode = ACCELERATION_PYTORCH
+                    acceleration_engine_path = ""
             else:
                 self.logger.info(
-                    "TensorRT acceleration disabled (GROOT_TRT_ENABLED=%s); "
-                    "using PyTorch Eager",
-                    os.environ.get("GROOT_TRT_ENABLED", "unset"),
+                    "TensorRT acceleration disabled by request; using PyTorch Eager"
                 )
+
+            self._loaded_model_path = model_path
+            self._loaded_acceleration_mode = acceleration_mode
+            self._loaded_acceleration_engine_path = acceleration_engine_path
 
             return {
                 "success": True,
@@ -287,15 +355,303 @@ class GR00TInference:
                 "action_keys": list(self.policy_info["action"]),
             }
         except Exception as e:
-            self.logger.error("Failed to start inference: %s", e, exc_info=True)
-            return self.fail(str(e))
+            self._loaded_model_path = None
+            self._loaded_acceleration_mode = ACCELERATION_PYTORCH
+            self._loaded_acceleration_engine_path = ""
+            message = self._format_load_error(e)
+            self.logger.error("Failed to start inference: %s", message, exc_info=True)
+            return self.fail(message)
+
+    @staticmethod
+    def _normalize_acceleration_mode(value: str) -> str:
+        mode = str(value or "").strip().lower()
+        if mode in {"", "none", "off", "false", "pytorch", "eager"}:
+            return ACCELERATION_PYTORCH
+        if mode in {"trt", "tensorrt", "tensorrt_dit", "dit", "dit_only"}:
+            return ACCELERATION_TENSORRT_DIT
+        if mode in {
+            "trt_full_pipeline",
+            "tensorrt_full_pipeline",
+            "full_pipeline",
+        }:
+            return ACCELERATION_TENSORRT_FULL_PIPELINE
+        return mode
+
+    def _resolve_acceleration_request(
+        self,
+        request,
+        model_path: str,
+    ) -> tuple[str, str, bool]:
+        raw_mode = str(getattr(request, "acceleration_mode", "") or "").strip()
+        strict = bool(raw_mode)
+        if raw_mode:
+            mode = self._normalize_acceleration_mode(raw_mode)
+        elif _env_flag("GROOT_TRT_ENABLED", default=False):
+            mode = ACCELERATION_TENSORRT_DIT
+        else:
+            mode = ACCELERATION_PYTORCH
+
+        if mode not in SUPPORTED_ACCELERATION_MODES:
+            raise RuntimeError(
+                f"Unsupported acceleration_mode={raw_mode!r}; expected one of "
+                f"{sorted(SUPPORTED_ACCELERATION_MODES)}"
+            )
+
+        if mode == ACCELERATION_PYTORCH:
+            return mode, "", strict
+
+        engine_path = str(
+            getattr(request, "acceleration_engine_path", "") or ""
+        ).strip()
+        if engine_path:
+            if not os.path.isabs(engine_path):
+                engine_path = os.path.join(model_path, engine_path)
+        else:
+            engine_path = os.path.join(model_path, "dit_model_bf16.trt")
+        return mode, os.path.normpath(engine_path), strict
+
+    def _enable_dit_tensorrt(
+        self,
+        request,
+        engine_path: str,
+        strict: bool,
+    ) -> bool:
+        try:
+            engine_dir = os.path.dirname(os.path.abspath(engine_path))
+            os.makedirs(engine_dir, exist_ok=True)
+            if not os.path.exists(engine_path):
+                raise FileNotFoundError(
+                    f"TRT engine not found: {engine_path}. "
+                    "Build the TensorRT engine before starting inference."
+                )
+            if os.path.getsize(engine_path) <= 0:
+                raise RuntimeError(f"TRT engine is empty: {engine_path}")
+
+            replace_dit_with_tensorrt(self.policy, engine_path)
+            self.logger.info("DiT accelerated with TensorRT: %s", engine_path)
+            return True
+        except Exception as e:
+            if strict:
+                raise RuntimeError(
+                    f"TensorRT acceleration requested but unavailable: {e}"
+                ) from e
+            self.logger.warning(
+                "TensorRT acceleration unavailable, using PyTorch Eager: %s", e
+            )
+            return False
+
+    def _sync_hf_token_for_gated_backbones(self) -> None:
+        if sync_token_file is None:
+            self.logger.warning("HF token sync helper unavailable")
+            return
+        if not sync_token_file():
+            self.logger.warning(
+                "No Hugging Face token found. GR00T N1.7 may need a token "
+                "to download the gated Cosmos-Reason2-2B backbone unless it "
+                "is already cached."
+            )
+
+    def _format_load_error(self, error: Exception) -> str:
+        message = str(error)
+        marker_text = message.lower()
+        gated_markers = (
+            "cannot access gated repo",
+            "access to model nvidia/cosmos-reason2-2b is restricted",
+            "401 client error",
+        )
+        if "cosmos-reason2-2b" in marker_text and any(
+            marker in marker_text for marker in gated_markers
+        ):
+            return (
+                "GR00T N1.7 needs access to the gated Hugging Face repo "
+                "nvidia/Cosmos-Reason2-2B. Register a Hugging Face token for "
+                "an approved account before loading the model, or pre-cache "
+                "the Cosmos backbone in the shared Hugging Face cache."
+            )
+        return message
 
     def _build_dummy_observation(self, task_instruction: str = "") -> dict:
         """Build a real observation from robot sensors for TRT engine building."""
         images = self.robot.get_images(format="rgb")
         joints = self.robot.get_joint_positions()
-        task = task_instruction or "dummy task"
-        return self.preprocess(images, joints, task)
+        return self.preprocess(images, joints, task_instruction)
+
+    def build_synthetic_observation(self, task_instruction: str = "") -> dict:
+        """Build a model-schema observation without live robot sensors."""
+        if self.policy is None:
+            return self.fail("Policy is not loaded")
+
+        image_h, image_w = self._model_image_hw()
+        image_c = self._model_image_channels()
+        video_t = self._modality_horizon("video")
+        state_t = self._modality_horizon("state")
+        language_t = self._modality_horizon("language")
+
+        video_obs = {
+            key: np.zeros(
+                (1, video_t, image_h, image_w, image_c),
+                dtype=np.uint8,
+            )
+            for key in self.policy_info["video"]
+        }
+        state_obs = {}
+        for key in self.policy_info["state"]:
+            dim = self._model_state_dim(key)
+            vector = self._model_state_vector(key)
+            state_obs[key] = (
+                np.broadcast_to(vector, (1, state_t, dim))
+                .astype(np.float32)
+                .copy()
+            )
+
+        language_obs = {
+            key: [[str(task_instruction)] * language_t]
+            for key in self.policy_info["language"]
+        }
+
+        return {
+            "video": video_obs,
+            "state": state_obs,
+            "language": language_obs,
+        }
+
+    def _embodiment_tag_value(self) -> str:
+        tag = getattr(self.policy, "embodiment_tag", None)
+        if hasattr(tag, "value"):
+            return str(tag.value)
+        if tag:
+            return str(tag)
+        return self.DEFAULT_EMBODIMENT_TAG
+
+    @staticmethod
+    def _entry_value(entry, name: str, default=None):
+        if isinstance(entry, dict):
+            return entry.get(name, default)
+        return getattr(entry, name, default)
+
+    def _policy_modality_entry(self, modality: str):
+        configs = getattr(self.policy, "modality_configs", None)
+        if configs is None:
+            all_configs = self.policy.processor.get_modality_configs()
+            configs = all_configs.get(self._embodiment_tag_value(), {})
+        entry = configs.get(modality) if isinstance(configs, dict) else None
+        if entry is None:
+            raise RuntimeError(f"Model is missing modality config: {modality}")
+        return entry
+
+    def _modality_horizon(self, modality: str) -> int:
+        entry = self._policy_modality_entry(modality)
+        delta_indices = self._entry_value(entry, "delta_indices")
+        if not delta_indices:
+            raise RuntimeError(
+                f"Model modality '{modality}' has no delta_indices"
+            )
+        return len(delta_indices)
+
+    @staticmethod
+    def _coerce_int_pair(value, label: str) -> tuple[int, int]:
+        if isinstance(value, str):
+            try:
+                value = ast.literal_eval(value)
+            except (SyntaxError, ValueError) as e:
+                raise RuntimeError(f"Invalid {label}: {value!r}") from e
+        if not isinstance(value, (list, tuple)) or len(value) != 2:
+            raise RuntimeError(f"Invalid {label}: {value!r}")
+        first, second = int(value[0]), int(value[1])
+        if first <= 0 or second <= 0:
+            raise RuntimeError(f"Invalid {label}: {value!r}")
+        return first, second
+
+    def _model_image_hw(self) -> tuple[int, int]:
+        candidates = [
+            getattr(getattr(self.policy, "processor", None), "image_target_size", None),
+            getattr(
+                getattr(getattr(self.policy, "processor", None), "config", None),
+                "image_target_size",
+                None,
+            ),
+            getattr(
+                getattr(getattr(self.policy, "model", None), "config", None),
+                "image_target_size",
+                None,
+            ),
+        ]
+        for candidate in candidates:
+            if candidate:
+                return self._coerce_int_pair(candidate, "image_target_size")
+        raise RuntimeError(
+            "Model image_target_size is unavailable; cannot build synthetic "
+            "TRT observation without hardcoded image dimensions"
+        )
+
+    def _model_image_channels(self) -> int:
+        processor = getattr(self.policy, "processor", None)
+        qwen_processor = getattr(processor, "processor", None)
+        candidates = [
+            getattr(getattr(qwen_processor, "image_processor", None), "image_mean", None),
+            getattr(getattr(qwen_processor, "image_processor", None), "image_std", None),
+            getattr(getattr(qwen_processor, "video_processor", None), "image_mean", None),
+            getattr(getattr(qwen_processor, "video_processor", None), "image_std", None),
+            getattr(processor, "image_mean", None),
+            getattr(processor, "image_std", None),
+        ]
+        for candidate in candidates:
+            if isinstance(candidate, (list, tuple)) and candidate:
+                return len(candidate)
+
+        num_channels = getattr(
+            getattr(getattr(self.policy, "model", None), "config", None),
+            "num_channels",
+            None,
+        )
+        if num_channels:
+            channels = int(num_channels)
+            if channels > 0:
+                return channels
+
+        raise RuntimeError(
+            "Model image channel count is unavailable; cannot build synthetic "
+            "TRT observation without hardcoded image channels"
+        )
+
+    def _state_norm_params(self, key: str) -> dict:
+        processor = getattr(self.policy, "processor", None)
+        state_action_processor = getattr(processor, "state_action_processor", None)
+        norm_params = getattr(state_action_processor, "norm_params", None)
+        tag = self._embodiment_tag_value()
+        try:
+            return norm_params[tag]["state"][key]
+        except (TypeError, KeyError) as e:
+            raise RuntimeError(
+                f"Model statistics are missing state dimension for '{key}' "
+                f"under embodiment '{tag}'"
+            ) from e
+
+    def _model_state_dim(self, key: str) -> int:
+        params = self._state_norm_params(key)
+        dim = params.get("dim")
+        try:
+            result = int(np.asarray(dim).item())
+        except (TypeError, ValueError) as e:
+            raise RuntimeError(f"Invalid state dimension for '{key}': {dim!r}") from e
+        if result <= 0:
+            raise RuntimeError(f"Invalid state dimension for '{key}': {result}")
+        return result
+
+    def _model_state_vector(self, key: str) -> np.ndarray:
+        params = self._state_norm_params(key)
+        dim = self._model_state_dim(key)
+        mean = params.get("mean")
+        if mean is None:
+            return np.zeros((dim,), dtype=np.float32)
+
+        vector = np.asarray(mean, dtype=np.float32)
+        if vector.size != dim:
+            raise RuntimeError(
+                f"Model state mean for '{key}' has {vector.size} values, "
+                f"expected {dim}"
+            )
+        return vector.reshape(dim)
 
     def init_policy_info(self) -> None:
         """Read video/state/action/language keys from the loaded policy."""
@@ -310,9 +666,10 @@ class GR00TInference:
                 self.policy_info[modality] = []
                 continue
             entry = mc[modality]
-            self.policy_info[modality] = getattr(
-                entry, "modality_keys",
-                entry.get("modality_keys", []) if isinstance(entry, dict) else [],
+            self.policy_info[modality] = self._entry_value(
+                entry,
+                "modality_keys",
+                [],
             )
 
         self.logger.info("Policy info: %s", self.policy_info)
@@ -323,11 +680,10 @@ class GR00TInference:
         cam_config = self.robot._config.get("cameras", {})
         available_cameras = set(self.robot.camera_names)
 
-        camera_sources = {}
-        for policy_key in self.policy_info["video"]:
-            source_key = self._resolve_camera_source(policy_key, available_cameras)
-            if source_key:
-                camera_sources[policy_key] = source_key
+        camera_sources = resolve_camera_feature_sources(
+            self.policy_info["video"],
+            available_cameras,
+        )
 
         self.robot_info["cameras"] = list(camera_sources.keys())
         self.robot_info["camera_sources"] = camera_sources
@@ -359,35 +715,6 @@ class GR00TInference:
         self.robot_info["sensor_states"] = sensor_states
 
         self.logger.info("Robot info: %s", self.robot_info)
-
-    def _resolve_camera_source(self, policy_key: str, available_cameras: set) -> Optional[str]:
-        if policy_key in available_cameras:
-            return policy_key
-
-        explicit_aliases = {
-            "cam_left_head": "cam_head_left",
-            "cam_right_head": "cam_head_right",
-            "cam_left_wrist": "cam_wrist_left",
-            "cam_right_wrist": "cam_wrist_right",
-        }
-        alias = explicit_aliases.get(policy_key)
-        if alias in available_cameras:
-            self.logger.info("Camera alias: %s <- %s", policy_key, alias)
-            return alias
-
-        parts = policy_key.split("_")
-        if len(parts) == 3 and parts[0] == "cam":
-            swapped = "_".join((parts[0], parts[2], parts[1]))
-            if swapped in available_cameras:
-                self.logger.info("Camera alias: %s <- %s", policy_key, swapped)
-                return swapped
-
-        self.logger.warning(
-            "No robot camera source matched policy camera key %s; available=%s",
-            policy_key,
-            sorted(available_cameras),
-        )
-        return None
 
     def get_action_chunk(self, request) -> dict:
         """Build observation from RobotClient, run inference, return action chunk."""
@@ -498,3 +825,8 @@ class GR00TInference:
     @staticmethod
     def fail(message: str) -> dict:
         return {"success": False, "message": message}
+
+
+def create_engine() -> GR00TInference:
+    """Factory used by the shared Engine process."""
+    return GR00TInference()

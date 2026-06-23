@@ -2,6 +2,30 @@
 Changelog for package interfaces
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
+0.1.16 (2026-06-23)
+-------------------
+* None
+
+0.1.15 (2026-06-22)
+-------------------
+* Added action request scheduling and acceleration metadata to TaskInfo, InferenceCommand, and EngineCommand for policy runtime selection.
+* Contributors: Taehyeong Kim
+
+0.1.14 (2026-06-17)
+-------------------
+* Added RecordingStatus fields for saved subtask indices, recording warnings, and camera monitor diagnostics.
+* Documented targeted full-episode discard encoding on recording command segment_index.
+* Contributors: Taehyeong Kim
+
+0.1.13 (2026-06-11)
+-------------------
+* Added inference mode task metadata and command fields for 3D simulation versus real robot deployment.
+* Contributors: Dongyun Kim
+
+0.1.12 (2026-06-05)
+-------------------
+* None
+
 0.1.11 (2026-06-05)
 -------------------
 * None
@@ -25,7 +49,7 @@ Changelog for package interfaces
 0.1.6 (2026-05-27)
 ------------------
 * Added behavior tree node catalog and tree list service definitions.
-* Contributors: kimtaehyeong99, Seongoo
+* Contributors: Taehyeong Kim, Seongwoo Kim
 
 0.1.5 (2026-05-26)
 ------------------

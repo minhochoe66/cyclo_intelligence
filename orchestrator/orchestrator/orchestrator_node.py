@@ -67,6 +67,9 @@ from cyclo_data.recorder.replay_handler import ReplayDataHandler
 from orchestrator.internal.communication.container_service_client import (
     ContainerServiceClient,
 )
+from orchestrator.internal.communication.inference_mode import (
+    publish_to_robot_from_task_info,
+)
 from orchestrator.timer.timer_manager import TimerManager
 from orchestrator.training.zenoh_training_manager import ZenohTrainingManager
 from orchestrator.internal.file_browser.file_browse_utils import FileBrowseUtils
@@ -130,6 +133,9 @@ class OrchestratorNode(Node):
         # that needs to acquire it. The lock only brackets pointer
         # reads/writes and the snapshot helper.
         self._state_lock = threading.Lock()
+        # UI service callbacks and joystick subscriptions can both forward
+        # recording commands; serialize those calls without holding state_lock.
+        self._recording_command_lock = threading.Lock()
 
         self.params = None
         self.robot_section = None
@@ -181,6 +187,10 @@ class OrchestratorNode(Node):
         # LOAD / START / PAUSE / RESUME / STOP / UNLOAD from UI commands.
         self.container_service_client: Optional[ContainerServiceClient] = None
         self._loaded_inference_policy_path: str = ''
+        self._loaded_inference_publish_to_robot: bool = False
+        self._loaded_inference_acceleration_mode: str = 'pytorch'
+        self._loaded_inference_acceleration_engine_path: str = ''
+        self._loaded_inference_action_request_mode: str = 'async'
 
         # HF endpoint registry — orchestrator-owned because the
         # set/get/list/select_hf_endpoint services also read and mutate
@@ -288,7 +298,7 @@ class OrchestratorNode(Node):
             else []
         )
         urdf_path = self.params.get('urdf_path', '') if self.params else ''
-        timeout_sec = 120.0 if command in {
+        timeout_sec = 0.0 if command in {
             RecordingCommand.Request.STOP,
             RecordingCommand.Request.MOVE_TO_NEXT,
             RecordingCommand.Request.FINISH,
@@ -299,15 +309,19 @@ class OrchestratorNode(Node):
             RecordingCommand.Request.RERECORD,
             RecordingCommand.Request.DISCARD_EPISODE,
         } else 5.0
-        return self._cyclo_data.send_recording_command(
-            command=command,
-            task_info=task_info if task_info is not None else self._last_ui_task_info,
-            robot_type=getattr(self, 'robot_type', ''),
-            topics=topics,
-            urdf_path=urdf_path,
-            segment_index=segment_index,
-            timeout_sec=timeout_sec,
-        )
+        with self._recording_command_lock:
+            return self._cyclo_data.send_recording_command(
+                command=command,
+                task_info=(
+                    task_info if task_info is not None
+                    else self._last_ui_task_info
+                ),
+                robot_type=getattr(self, 'robot_type', ''),
+                topics=topics,
+                urdf_path=urdf_path,
+                segment_index=segment_index,
+                timeout_sec=timeout_sec,
+            )
 
     @staticmethod
     def _task_info_record_signature(task_info: Optional[TaskInfo]):
@@ -354,6 +368,49 @@ class OrchestratorNode(Node):
         else:
             self.get_logger().info(
                 f'{source}: cached task_info for existing task={task_name}')
+
+    @staticmethod
+    def _copy_task_info(task_info: TaskInfo) -> TaskInfo:
+        copied = TaskInfo()
+        for field_name in (
+            'task_num',
+            'task_name',
+            'task_type',
+            'task_instruction',
+            'subtask_instruction',
+            'policy_path',
+            'tags',
+            'record_inference_mode',
+            'control_hz',
+            'inference_hz',
+            'chunk_align_window_s',
+            'include_robotis_license',
+            'service_type',
+            'inference_mode',
+            'action_request_mode',
+            'acceleration_mode',
+            'acceleration_engine_path',
+        ):
+            value = getattr(task_info, field_name)
+            if isinstance(value, list):
+                value = list(value)
+            setattr(copied, field_name, value)
+        return copied
+
+    def _get_inference_record_task_info(self) -> Optional[TaskInfo]:
+        task_info = self._prepared_inference_task_info
+        if task_info is None:
+            task_info = self._last_ui_task_info
+        if task_info is None:
+            return None
+        if getattr(task_info, 'task_type', '') != 'inference':
+            task_info = self._copy_task_info(task_info)
+            task_info.task_type = 'inference'
+            task_info.subtask_instruction = []
+        task_info.record_inference_mode = True
+        self._prepared_inference_task_info = task_info
+        self._last_ui_task_info = task_info
+        return task_info
 
     def _data_operation_status_callback(self, msg: DataOperationStatus):
         """Debug-log DataOperationStatus arrivals.
@@ -1068,15 +1125,10 @@ class OrchestratorNode(Node):
                     response.success = False
                     response.message = 'Communicator not initialized'
                     return response
-                rosbag_topics = self.communicator.get_mcap_topics()
-                urdf_path = self.params.get('urdf_path', '') if self.params else ''
-
-                cd_result = self._cyclo_data.send_recording_command(
-                    command=RecordingCommand.Request.START,
+                cd_result = self._forward_recording(
+                    RecordingCommand.Request.START,
                     task_info=task_info,
-                    robot_type=self.robot_type,
-                    topics=rosbag_topics,
-                    urdf_path=urdf_path,
+                    include_topics=True,
                 )
                 if (cd_result.success
                         and cd_result.response is not None
@@ -1196,13 +1248,21 @@ class OrchestratorNode(Node):
 
             elif request.command == SendCommand.Request.START_INFERENCE:
                 task_info = request.task_info
+                self._cache_ui_task_info(task_info, 'START_INFERENCE')
 
                 task_instruction = (
                     task_info.task_instruction[0]
                     if task_info.task_instruction
                     else ''
                 )
+                publish_to_robot = publish_to_robot_from_task_info(task_info)
                 service_prefix = self._determine_service_prefix(task_info)
+                requested_acceleration_mode, requested_acceleration_engine_path = (
+                    self._acceleration_from_task_info(task_info)
+                )
+                requested_action_request_mode = (
+                    self._action_request_mode_from_task_info(task_info)
+                )
 
                 # If the requested policy is already loaded on this
                 # container, treat START_INFERENCE as RESUME. If the user
@@ -1222,19 +1282,40 @@ class OrchestratorNode(Node):
                 with self._state_lock:
                     existing_client = self.container_service_client
                     loaded_policy_path = self._loaded_inference_policy_path
+                    loaded_acceleration_mode = (
+                        self._loaded_inference_acceleration_mode
+                    )
+                    loaded_acceleration_engine_path = (
+                        self._loaded_inference_acceleration_engine_path
+                    )
+                    loaded_action_request_mode = (
+                        self._loaded_inference_action_request_mode
+                    )
                 start_handled = False
                 if (
                     existing_client is not None
                     and existing_client._service_prefix == service_prefix
                 ):
+                    loaded_signature = (
+                        loaded_policy_path,
+                        loaded_acceleration_mode,
+                        loaded_acceleration_engine_path,
+                        loaded_action_request_mode,
+                    )
+                    requested_signature = (
+                        requested_policy_path,
+                        requested_acceleration_mode,
+                        requested_acceleration_engine_path,
+                        requested_action_request_mode,
+                    )
                     if (
                         requested_policy_path
                         and loaded_policy_path
-                        and requested_policy_path != loaded_policy_path
+                        and requested_signature != loaded_signature
                     ):
                         self.get_logger().info(
-                            'Requested inference policy changed '
-                            f'({loaded_policy_path} -> {requested_policy_path}); '
+                            'Requested inference policy/runtime changed '
+                            f'({loaded_signature} -> {requested_signature}); '
                             'reloading policy'
                         )
                         self._teardown_inference_client()
@@ -1242,8 +1323,13 @@ class OrchestratorNode(Node):
                         resume_result = existing_client.inference_command(
                             ContainerServiceClient.CMD_RESUME,
                             task_instruction=task_instruction,
+                            publish_to_robot=publish_to_robot,
                         )
                         if resume_result.success:
+                            with self._state_lock:
+                                self._loaded_inference_publish_to_robot = (
+                                    publish_to_robot
+                                )
                             self._set_session_active(
                                 on_inference=True,
                                 start_time=time.perf_counter(),
@@ -1317,6 +1403,12 @@ class OrchestratorNode(Node):
                                 embodiment_tag='new_embodiment',
                                 robot_type=robot_type,
                                 task_instruction=task_instruction,
+                                publish_to_robot=publish_to_robot,
+                                acceleration_mode=requested_acceleration_mode,
+                                acceleration_engine_path=(
+                                    requested_acceleration_engine_path
+                                ),
+                                action_request_mode=requested_action_request_mode,
                             )
                             if not load_result.success:
                                 self.get_logger().error(
@@ -1335,6 +1427,7 @@ class OrchestratorNode(Node):
 
                             start_result = client.inference_command(
                                 ContainerServiceClient.CMD_START,
+                                publish_to_robot=publish_to_robot,
                             )
                             if not start_result.success:
                                 self.get_logger().error(
@@ -1354,6 +1447,18 @@ class OrchestratorNode(Node):
                                 if self.container_service_client is client:
                                     self._loaded_inference_policy_path = (
                                         normalized_model_path
+                                    )
+                                    self._loaded_inference_publish_to_robot = (
+                                        publish_to_robot
+                                    )
+                                    self._loaded_inference_acceleration_mode = (
+                                        requested_acceleration_mode
+                                    )
+                                    self._loaded_inference_acceleration_engine_path = (
+                                        requested_acceleration_engine_path
+                                    )
+                                    self._loaded_inference_action_request_mode = (
+                                        requested_action_request_mode
                                     )
                             self._publish_inference_phase(InferenceStatus.INFERENCING)
                         except Exception as e:
@@ -1376,7 +1481,8 @@ class OrchestratorNode(Node):
 
                     response.success = True
                     response.message = (
-                        f'{service_prefix.strip("/").upper()} inference loading'
+                        f'{service_prefix.strip("/").upper()} inference loading '
+                        f'({"robot" if publish_to_robot else "simulation"} mode)'
                     )
 
             elif request.command == SendCommand.Request.CONVERT_MP4:
@@ -1511,46 +1617,34 @@ class OrchestratorNode(Node):
                 )
                 if not snapshot_on_recording and not snapshot_on_inference:
                     # Not recording — CANCEL/RERECORD have nothing to
-                    # do at idle. Forward anyway so cyclo_data's
-                    # handler can publish the umbrella status response
-                    # consistently with the recording paths below.
+                    # do at idle. Do not forward a targetless CANCEL here:
+                    # a concurrent joystick/UI START could otherwise turn
+                    # this stale idle no-op into deletion of a fresh segment.
                     if request.command in (
                         SendCommand.Request.CANCEL,
                         SendCommand.Request.RERECORD,
                     ):
-                        cd_result = self._cyclo_data.send_recording_command(
-                            command=RecordingCommand.Request.CANCEL,
-                            task_info=request.task_info,
-                            robot_type=self.robot_type,
+                        response.success = True
+                        response.message = (
+                            'CANCEL: no active recording — nothing to discard'
                         )
-                        self._apply_cyclo_data_response(cd_result, response)
                     else:
                         response.success = False
                         response.message = 'Not currently recording'
                 else:
                     if request.command == SendCommand.Request.STOP:
                         self.get_logger().info('Stopping and saving recording (forwarder)')
-                        cd_result = self._cyclo_data.send_recording_command(
-                            command=RecordingCommand.Request.STOP,
+                        cd_result = self._forward_recording(
+                            RecordingCommand.Request.STOP,
                             task_info=request.task_info,
-                            robot_type=self.robot_type,
-                            urdf_path=(
-                                self.params.get('urdf_path', '')
-                                if self.params else ''
-                            ),
                         )
                         self._apply_cyclo_data_response(cd_result, response)
 
                     elif request.command == SendCommand.Request.MOVE_TO_NEXT:
                         self.get_logger().info('Saving current episode (forwarder)')
-                        cd_result = self._cyclo_data.send_recording_command(
-                            command=RecordingCommand.Request.MOVE_TO_NEXT,
+                        cd_result = self._forward_recording(
+                            RecordingCommand.Request.MOVE_TO_NEXT,
                             task_info=request.task_info,
-                            robot_type=self.robot_type,
-                            urdf_path=(
-                                self.params.get('urdf_path', '')
-                                if self.params else ''
-                            ),
                         )
                         self._apply_cyclo_data_response(cd_result, response)
 
@@ -1559,14 +1653,9 @@ class OrchestratorNode(Node):
                         # flag — that field was removed); orchestrator
                         # still owns inference teardown + timer_manager.
                         self.get_logger().info('Cancelling current recording (forwarder)')
-                        cd_result = self._cyclo_data.send_recording_command(
-                            command=RecordingCommand.Request.RERECORD,
+                        cd_result = self._forward_recording(
+                            RecordingCommand.Request.RERECORD,
                             task_info=request.task_info,
-                            robot_type=self.robot_type,
-                            urdf_path=(
-                                self.params.get('urdf_path', '')
-                                if self.params else ''
-                            ),
                         )
                         if (cd_result.success
                                 and cd_result.response is not None
@@ -1603,6 +1692,9 @@ class OrchestratorNode(Node):
                     elif request.command == SendCommand.Request.RESUME_INFERENCE:
                         with self._state_lock:
                             client = self.container_service_client
+                            loaded_publish_to_robot = (
+                                self._loaded_inference_publish_to_robot
+                            )
                         if client is not None:
                             task_instruction = (
                                 request.task_info.task_instruction[0]
@@ -1612,6 +1704,7 @@ class OrchestratorNode(Node):
                             result = client.inference_command(
                                 ContainerServiceClient.CMD_RESUME,
                                 task_instruction=task_instruction,
+                                publish_to_robot=loaded_publish_to_robot,
                             )
                             if result.success:
                                 self.on_inference = True
@@ -1625,6 +1718,10 @@ class OrchestratorNode(Node):
                     elif request.command == SendCommand.Request.UPDATE_INSTRUCTION:
                         # Mid-run language re-conditioning. Lifecycle stays
                         # at INFERENCING — no inference_phase publish.
+                        self._cache_ui_task_info(
+                            request.task_info,
+                            'UPDATE_INSTRUCTION',
+                        )
                         with self._state_lock:
                             client = self.container_service_client
                         if client is not None:
@@ -1648,9 +1745,18 @@ class OrchestratorNode(Node):
                     elif request.command == SendCommand.Request.START_INFERENCE_RECORD:
                         self.get_logger().info(
                             'Starting recording during inference (forwarder)')
+                        self._cache_ui_task_info(
+                            request.task_info,
+                            'START_INFERENCE_RECORD',
+                        )
+                        record_task_info = self._get_inference_record_task_info()
+                        if record_task_info is None:
+                            response.success = False
+                            response.message = 'No inference task info available'
+                            return response
                         cd_result = self._forward_recording(
                             RecordingCommand.Request.START,
-                            task_info=request.task_info,
+                            task_info=record_task_info,
                             include_topics=True,
                         )
                         if (cd_result.success
@@ -2186,6 +2292,46 @@ class OrchestratorNode(Node):
             return ''
         return os.path.normpath(value)
 
+    @staticmethod
+    def _normalize_acceleration_mode(value: str) -> str:
+        mode = str(value or '').strip().lower()
+        if mode in {'', 'none', 'off', 'false', 'pytorch', 'eager'}:
+            return 'pytorch'
+        if mode in {'trt', 'tensorrt', 'tensorrt_dit', 'dit', 'dit_only'}:
+            return 'tensorrt_dit'
+        if mode in {
+            'trt_full_pipeline',
+            'tensorrt_full_pipeline',
+            'full_pipeline',
+        }:
+            return 'tensorrt_full_pipeline'
+        return mode
+
+    @classmethod
+    def _acceleration_from_task_info(cls, task_info) -> tuple[str, str]:
+        mode = cls._normalize_acceleration_mode(
+            getattr(task_info, 'acceleration_mode', '')
+        )
+        engine_path = cls._normalize_policy_path(
+            getattr(task_info, 'acceleration_engine_path', '')
+        )
+        if mode == 'pytorch':
+            engine_path = ''
+        return mode, engine_path
+
+    @staticmethod
+    def _normalize_action_request_mode(value: str) -> str:
+        mode = str(value or '').strip().lower()
+        if mode == 'sync':
+            return 'sync'
+        return 'async'
+
+    @classmethod
+    def _action_request_mode_from_task_info(cls, task_info) -> str:
+        return cls._normalize_action_request_mode(
+            getattr(task_info, 'action_request_mode', '')
+        )
+
     def _determine_service_prefix(self, task_info) -> str:
         """Determine inference service prefix from task_info or policy config.
 
@@ -2243,6 +2389,10 @@ class OrchestratorNode(Node):
             client = self.container_service_client
             self.container_service_client = None
             self._loaded_inference_policy_path = ''
+            self._loaded_inference_publish_to_robot = False
+            self._loaded_inference_acceleration_mode = 'pytorch'
+            self._loaded_inference_acceleration_engine_path = ''
+            self._loaded_inference_action_request_mode = 'async'
         if client is None:
             return
 
@@ -2404,10 +2554,10 @@ class OrchestratorNode(Node):
         self.get_logger().error(f'Trigger CANCEL_SEGMENT failed: {message}')
 
     def _toggle_inference_trigger_recording(self, is_recording: bool) -> None:
-        task_info = self._prepared_inference_task_info
+        task_info = self._get_inference_record_task_info()
         if task_info is None:
             self.get_logger().warning(
-                'Inference trigger ignored: prepare the Inference record session first')
+                'Inference trigger ignored: no inference task info available')
             return
         if is_recording:
             self.get_logger().info('Trigger: STOP inference recording')
@@ -2449,10 +2599,10 @@ class OrchestratorNode(Node):
             self.get_logger().error(f'Trigger inference START failed: {message}')
 
     def _cancel_inference_trigger_recording(self) -> None:
-        task_info = self._prepared_inference_task_info
+        task_info = self._get_inference_record_task_info()
         if task_info is None:
             self.get_logger().warning(
-                'Inference trigger cancel ignored: prepare the Inference record session first')
+                'Inference trigger cancel ignored: no inference task info available')
             return
         self.get_logger().info('Trigger: CANCEL inference recording')
         cd_result = self._forward_recording(
@@ -2488,10 +2638,9 @@ class OrchestratorNode(Node):
                 self._snapshot_session_state()
             )
             if snapshot_on_inference:
-                if self._prepared_inference_task_info is None:
+                if self._get_inference_record_task_info() is None:
                     self.get_logger().warning(
-                        'Inference trigger ignored: prepare the Inference '
-                        'record session first')
+                        'Inference trigger ignored: no inference task info available')
                     return
                 if joystick_mode == 'right':
                     self._toggle_inference_trigger_recording(snapshot_on_recording)

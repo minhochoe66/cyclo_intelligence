@@ -35,14 +35,6 @@ def generate_launch_description():
         )
     )
 
-    # Keep the BT runtime node alive with bringup. BT Manager Start/Stop
-    # controls tree execution state, not this process lifecycle.
-    bt_node_launch = IncludeLaunchDescription(
-        PythonLaunchDescriptionSource(
-            os.path.join(pkg_dir, 'launch', 'bt_node.launch.py')
-        )
-    )
-
     # Rosbridge websocket node
     rosbridge_websocket_node = Node(
         package='rosbridge_server',
@@ -53,6 +45,8 @@ def generate_launch_description():
             'fragment_timeout': 600,
             'max_message_size': 100000000,  # 100MB
             'unregister_timeout': 10.0,
+            'default_call_service_timeout': 0.0,
+            'call_services_in_new_thread': True,
         }],
     )
 
@@ -75,7 +69,6 @@ def generate_launch_description():
 
     return LaunchDescription([
         orchestrator_launch,
-        bt_node_launch,
         rosbridge_websocket_node,
         rosbag_recorder_node,
         web_video_server_node

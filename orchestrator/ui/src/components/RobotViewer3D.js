@@ -19,6 +19,7 @@ const MIN_USEFUL_MODEL_DIMENSION = 0.15;
 
 const ROBOT_URDF_BASENAMES = {
   ffw_sg2_rev1: 'ffw_sg2_follower.urdf',
+  ffw_sg2_rev2: 'ffw_sg2_follower.urdf',
   ffw_bg2_rev4: 'ffw_bg2_rev4_follower.urdf',
 };
 
@@ -482,6 +483,7 @@ export default function RobotViewer3D({
   className = '',
   showSourceSelector = false,
   liveUpdateHz = 15,
+  defaultVisualizationSource = 'state',
 }) {
   const globalRobotType = useSelector((state) => state.tasks.robotType);
   const robotType = robotTypeOverride || globalRobotType;
@@ -521,10 +523,16 @@ export default function RobotViewer3D({
   );
   const cameraRef = useRef();
   const [activePreset, setActivePreset] = useState('perspective');
-  const [visualizationSource, setVisualizationSource] = useState('state');
+  const [visualizationSource, setVisualizationSource] = useState(defaultVisualizationSource);
   const [trajectoryPaths, setTrajectoryPaths] = useState(null);
   const [hasTrajectory, setHasTrajectory] = useState(false);
   const actionPreviewEnabled = showSourceSelector && visualizationSource === 'action';
+
+  useEffect(() => {
+    if (showSourceSelector) {
+      setVisualizationSource(defaultVisualizationSource);
+    }
+  }, [defaultVisualizationSource, showSourceSelector]);
 
   const handleJointState = useCallback((data) => {
     setJointValues(data);

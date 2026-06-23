@@ -44,11 +44,22 @@ RUN apt-get update && apt-get install -y \
     nano \
     nginx \
     docker.io \
+    docker-compose-v2 \
     python3-pip \
     ros-${ROS_DISTRO}-rmw-zenoh-cpp \
     ros-${ROS_DISTRO}-rosbridge-server \
     ros-${ROS_DISTRO}-web-video-server \
     && rm -rf /var/lib/apt/lists/*
+
+# Keep Node/npm available in the runtime image too. Cyclo is a research
+# platform, so being able to rebuild/test the React UI from inside the
+# running container is worth the extra image size. Copy from the same
+# node:22 stage that builds the production bundle so versions stay aligned.
+COPY --from=ui-builder /usr/local/bin/node /usr/local/bin/node
+COPY --from=ui-builder /usr/local/lib/node_modules /usr/local/lib/node_modules
+RUN ln -sf ../lib/node_modules/npm/bin/npm-cli.js /usr/local/bin/npm && \
+    ln -sf ../lib/node_modules/npm/bin/npx-cli.js /usr/local/bin/npx && \
+    node --version && npm --version
 
 ENV COLCON_WS=/root/ros2_ws
 WORKDIR ${COLCON_WS}
@@ -110,7 +121,6 @@ RUN echo "source /opt/ros/${ROS_DISTRO}/setup.bash" >> /root/.bashrc && \
     echo "export ROS_DOMAIN_ID=30" >> /root/.bashrc && \
     echo "export RMW_IMPLEMENTATION=rmw_zenoh_cpp" >> /root/.bashrc && \
     echo "export ZENOH_CONFIG_OVERRIDE='transport/shared_memory/enabled=true'" >> /root/.bashrc && \
-    echo "alias zenoh='ros2 run rmw_zenoh_cpp rmw_zenohd'" >> /root/.bashrc && \
     echo "alias cb='cd ${COLCON_WS} && colcon build --symlink-install --paths src/cyclo_intelligence/orchestrator src/cyclo_intelligence/cyclo_data src/cyclo_intelligence/cyclo_data/recorder/rosbag_recorder src/cyclo_intelligence/interfaces src/cyclo_intelligence/shared --cmake-args -DCMAKE_BUILD_TYPE=Release'" >> /root/.bashrc && \
     echo "alias orchestrator='ros2 launch orchestrator orchestrator_bringup.launch.py'" >> /root/.bashrc && \
     echo "alias cyclo_data='ros2 run cyclo_data cyclo_data_node'" >> /root/.bashrc && \
@@ -137,9 +147,9 @@ RUN mkdir -p /usr/local/lib/s6-services && \
     chmod +x /usr/local/lib/s6-services/ros2_service_run.sh \
              /usr/local/lib/s6-services/ros2_service_finish.sh
 
-RUN mkdir -p /var/log/orchestrator /var/log/cyclo_data /var/log/cyclo_intelligence && \
-    chown -R nobody:nogroup /var/log/orchestrator /var/log/cyclo_data /var/log/cyclo_intelligence && \
-    chmod -R 02755 /var/log/orchestrator /var/log/cyclo_data /var/log/cyclo_intelligence
+RUN mkdir -p /var/log/orchestrator /var/log/cyclo_data /var/log/cyclo_intelligence /var/log/bt_node && \
+    chown -R nobody:nogroup /var/log/orchestrator /var/log/cyclo_data /var/log/cyclo_intelligence /var/log/bt_node && \
+    chmod -R 02755 /var/log/orchestrator /var/log/cyclo_data /var/log/cyclo_intelligence /var/log/bt_node
 
 COPY docker/supervisor_api /opt/supervisor_api
 RUN pip install --no-cache-dir --break-system-packages \

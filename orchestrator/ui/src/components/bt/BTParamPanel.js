@@ -51,6 +51,9 @@ const ENUM_PARAMS = {
     'groot',
     'lerobot',
   ],
+  inference_mode: ['simulation', 'robot'],
+  action_request_mode: ['async', 'sync'],
+  acceleration_mode: ['pytorch', 'tensorrt_dit'],
 };
 
 // SendCommand inputs that are meaningful per command. Anything outside
@@ -60,10 +63,10 @@ const ENUM_PARAMS = {
 const SEND_COMMAND_ACTIVE_FIELDS = {
   LOAD: new Set([
     'command', 'model', 'policy_path', 'task_instruction',
-    'inference_hz', 'control_hz', 'chunk_align_window_s',
+    'inference_mode', 'action_request_mode', 'inference_hz', 'control_hz',
+    'chunk_align_window_s', 'acceleration_mode', 'acceleration_engine_path',
   ]),
-  // Resume re-conditions language mid-run; the other LOAD inputs are
-  // already baked into the loaded policy.
+  // Resume can re-condition language mid-run; output mode is fixed by LOAD.
   RESUME: new Set(['command', 'task_instruction']),
   STOP: new Set(['command']),
   CLEAR: new Set(['command']),
