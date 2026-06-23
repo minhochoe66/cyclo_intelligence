@@ -21,7 +21,7 @@
  *  - Seek is non-blocking with token-based cancellation and error recovery
  */
 
-import { useRef, useState, useCallback, useEffect } from "react";
+import { useRef, useState, useCallback, useEffect, useMemo } from "react";
 import { useDispatch } from "react-redux";
 import { setCurrentTime, setIsPlaying } from "../features/replay/replaySlice";
 import { getMcapWorker, disposeMcapWorker } from "../workers/mcapReaderProxy";
@@ -770,6 +770,7 @@ export function useMcapFramePlayer({
 
   useEffect(() => {
     const queue = frameQueueRef.current;
+    const bitmapCache = bitmapCacheRef.current;
     return () => {
       if (animFrameRef.current) cancelAnimationFrame(animFrameRef.current);
       drainActiveRef.current = false;
@@ -782,11 +783,10 @@ export function useMcapFramePlayer({
 
       queue.clear();
       // Close all cached bitmaps
-      const cache = bitmapCacheRef.current;
-      for (const bmp of cache.values()) {
+      for (const bmp of bitmapCache.values()) {
         if (bmp && bmp.close) bmp.close();
       }
-      cache.clear();
+      bitmapCache.clear();
     };
   }, []);
 
@@ -794,7 +794,11 @@ export function useMcapFramePlayer({
   // Return interface
   // ---------------------------------------------------------------------------
 
-  return {
+  const setPlaybackSpeedCallback = useCallback((speed) => {
+    playbackSpeedRef.current = speed;
+  }, []);
+
+  return useMemo(() => ({
     imageTopics: readerState.imageTopics,
     isLoading: readerState.isLoading,
     isReady: readerState.isReady,
@@ -814,12 +818,27 @@ export function useMcapFramePlayer({
     syncToTime,
     handleProgressClick,
 
-    setPlaybackSpeed: (speed) => {
-      playbackSpeedRef.current = speed;
-    },
+    setPlaybackSpeed: setPlaybackSpeedCallback,
     handleTimeUpdate: () => {},
     handleEnded: () => {},
-  };
+  }), [
+    readerState.imageTopics,
+    readerState.isLoading,
+    readerState.isReady,
+    readerState.error,
+    setCanvasRef,
+    setWebGLPanelRef,
+    getCanvas,
+    togglePlayPause,
+    playAll,
+    pauseAll,
+    restart,
+    stepFrame,
+    seekRelative,
+    syncToTime,
+    handleProgressClick,
+    setPlaybackSpeedCallback,
+  ]);
 }
 
 export default useMcapFramePlayer;

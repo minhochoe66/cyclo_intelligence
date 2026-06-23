@@ -494,8 +494,10 @@ function ReplayPage({ isActive }) {
 
   useEffect(() => {
     if (!segmentVideoMode) return;
-    setExpandedVideoIndex(null);
-  }, [activeVideoSegment, segmentVideoMode]);
+    setExpandedVideoIndex((index) => (
+      index === null ? null : Math.max(0, Math.min((currentVideoFiles.length || 1) - 1, index))
+    ));
+  }, [currentVideoFiles.length, segmentVideoMode]);
 
   // Cleanup all cached blob URLs on unmount only
   useEffect(() => {
@@ -522,7 +524,7 @@ function ReplayPage({ isActive }) {
     [currentTime]
   );
 
-  // Auto-expand all joints when data loads
+  // Auto-expand all joints when data loads.
   useEffect(() => {
     if (allJointNames.length > 0) {
       setExpandedJoints(new Set(allJointNames));
@@ -1076,7 +1078,7 @@ function ReplayPage({ isActive }) {
   }, [isVideoLoaded, isDirectMcapMode, mcapPlayer, duration, syncVideosToGlobalTime, dispatch]);
 
   // Extract short name from video file path
-  const getShortVideoName = (filePath) => {
+  const getShortVideoName = useCallback((filePath) => {
     const fileName = filePath.split('/').pop();
     return fileName
       .replace('.mp4', '')
@@ -1084,7 +1086,7 @@ function ReplayPage({ isActive }) {
       .split('_')
       .slice(-3)
       .join('_');
-  };
+  }, []);
 
   // Reset state when leaving page
   useEffect(() => {
@@ -1107,6 +1109,7 @@ function ReplayPage({ isActive }) {
   useEffect(() => {
     setVideoBlobUrls([]);
     setDownloadProgress(0);
+    setExpandedVideoIndex(null);
   }, [selectedBagPath]);
 
   // Hidden panels list

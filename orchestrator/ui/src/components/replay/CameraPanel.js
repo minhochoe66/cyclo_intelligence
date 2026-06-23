@@ -194,9 +194,16 @@ function CameraPanel({
     : '';
   const isFocusedView = expandedVideoIndex !== null;
 
-  const renderSegmentVideo = (segmentKey, index, src, className, preload = 'metadata') => (
+  const renderSegmentVideo = (
+    segmentKey,
+    index,
+    src,
+    className,
+    preload = 'metadata',
+    registerPlayback = true
+  ) => (
     <video
-      ref={(el) => setSegmentVideoElement(segmentKey, index, el)}
+      ref={registerPlayback ? ((el) => setSegmentVideoElement(segmentKey, index, el)) : undefined}
       src={src || ''}
       data-segment-key={segmentKey}
       className={className}

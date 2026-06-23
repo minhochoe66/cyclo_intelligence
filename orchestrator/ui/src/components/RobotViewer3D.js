@@ -614,7 +614,7 @@ export default function RobotViewer3D({
         shadows={{ type: THREE.PCFShadowMap }}
       >
         <FrameInvalidator
-          fps={mode === 'replay' ? 30 : Math.max(10, liveUpdateHz || 15)}
+          fps={mode === 'replay' ? 15 : Math.max(10, liveUpdateHz || 15)}
           active={mode !== 'replay' || isPlaying}
         />
         {mode === 'replay' ? (
