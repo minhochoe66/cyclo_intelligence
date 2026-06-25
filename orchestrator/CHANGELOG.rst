@@ -2,6 +2,11 @@
 Changelog for package orchestrator
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
+0.2.0 (2026-06-25)
+------------------
+* Added Replay regression coverage for segmented video metadata and robot-configured joint/action layouts.
+* Contributors: Taehyeong Kim
+
 0.1.16 (2026-06-23)
 -------------------
 * Removed the Cyclo-managed ``zenoh_router`` service from supervisor user controls so Cyclo uses the externally managed router on port 7447.
