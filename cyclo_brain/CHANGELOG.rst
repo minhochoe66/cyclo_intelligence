@@ -2,6 +2,11 @@
 Changelog for package cyclo_brain
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
+0.2.1 (2026-06-26)
+------------------
+* Updated the Isaac-GR00T submodule to include Cyclo GR00T modality configuration examples.
+* Contributors: Taehyeong Kim
+
 0.2.0 (2026-06-25)
 ------------------
 * None
