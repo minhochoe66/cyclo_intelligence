@@ -4,7 +4,6 @@ orchestrator:
       robot_name: "FFW SH5 Rev1"
       urdf_path: urdf/ffw_sh5_follower.urdf
 
-      # SH5 records ZED head cameras only. Wrist RealSense cameras are not
       # part of the default SH5 recording layout.
       observation:
         images:
@@ -14,6 +13,14 @@ orchestrator:
           cam_right_head:
             topic: /zed/zed_node/right/image_rect_color/compressed
             msg_type: sensor_msgs/msg/CompressedImage
+          cam_left_wrist:
+            topic: /camera_left/camera_left/color/image_rect_raw/compressed
+            msg_type: sensor_msgs/msg/CompressedImage
+            rotation_deg: 270
+          cam_right_wrist:
+            topic: /camera_right/camera_right/color/image_rect_raw/compressed
+            msg_type: sensor_msgs/msg/CompressedImage
+            rotation_deg: 270
 
         # Raw tactile observations are recorded to MCAP, but not flattened
         # into observation.state until the converter has a HandPressures parser.
@@ -190,3 +197,5 @@ orchestrator:
           - /tf
           - /zed/zed_node/left/camera_info
           - /zed/zed_node/right/camera_info
+          - /camera_left/camera_left/color/camera_info
+          - /camera_right/camera_right/color/camera_info
