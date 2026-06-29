@@ -32,6 +32,10 @@ around what a VLA dataset / training pipeline cares about:
         topic: <ros topic>
         msg_type: <ros msg type string>
         joint_names: [<name>, ...]
+    tactile:
+      <sensor_name>:
+        topic: <ros topic>
+        msg_type: <ros msg type string>
   action:
     <modality>:
       topic: <ros topic>                  # both inference command + record target
@@ -180,6 +184,28 @@ def get_state_groups(section: Dict[str, Any]) -> Dict[str, Dict[str, Any]]:
     return result
 
 
+def get_tactile_topics(section: Dict[str, Any]) -> Dict[str, Dict[str, Any]]:
+    """Return ``{sensor_name: {topic, msg_type}}`` for raw tactile streams.
+
+    Tactile messages are robot observations, but they are intentionally
+    separate from ``observation.state`` until the converter has an explicit
+    ``HandPressures`` -> numeric vector parser.
+    """
+    tactile = (section.get("observation") or {}).get("tactile") or {}
+    result: Dict[str, Dict[str, Any]] = {}
+    for name, cfg in tactile.items():
+        if not isinstance(cfg, dict):
+            continue
+        result[name] = {
+            "topic": cfg["topic"],
+            "msg_type": cfg.get(
+                "msg_type",
+                "robotis_interfaces/msg/HandPressures",
+            ),
+        }
+    return result
+
+
 def get_action_groups(section: Dict[str, Any]) -> Dict[str, Dict[str, Any]]:
     """Return ``{modality: {topic, msg_type, joint_names}}``.
 
@@ -251,13 +277,15 @@ def get_mcap_record_topics(section: Dict[str, Any]) -> List[str]:
 
     Recording format version 2 routes images to per-camera MP4 files and
     camera_info to one-shot yaml snapshots, so the MCAP only carries the
-    timeseries the policy actually consumes (state + action) plus /tf for
-    debug visualisation. Order is deterministic (state groups → action
-    groups → extras minus camera_info).
+    timeseries the policy consumes or may consume later (state + tactile +
+    action) plus /tf for debug visualisation. Order is deterministic
+    (state groups → tactile groups → action groups → extras minus camera_info).
     """
     info_topics = set(get_camera_info_topics(section).values())
     topics: List[str] = []
     for cfg in get_state_groups(section).values():
+        topics.append(cfg["topic"])
+    for cfg in get_tactile_topics(section).values():
         topics.append(cfg["topic"])
     for cfg in get_action_groups(section).values():
         topics.append(cfg["topic"])
@@ -280,6 +308,8 @@ def get_recording_topics(section: Dict[str, Any]) -> List[str]:
     for cfg in get_image_topics(section).values():
         topics.append(cfg["topic"])
     for cfg in get_state_groups(section).values():
+        topics.append(cfg["topic"])
+    for cfg in get_tactile_topics(section).values():
         topics.append(cfg["topic"])
     for cfg in get_action_groups(section).values():
         topics.append(cfg["topic"])
