@@ -1,5 +1,6 @@
 from pathlib import Path
 import sys
+import xml.etree.ElementTree as ET
 
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -46,6 +47,44 @@ def test_sh5_state_and_action_dimensions_match_layout():
 
     assert state_dim == 60
     assert action_dim == 60
+
+
+def test_sh5_urdf_path_and_mesh_assets_resolve():
+    section = robot_schema.load_robot_section("ffw_sh5_rev1")
+
+    urdf_path = Path(robot_schema.get_urdf_path(section))
+    assert urdf_path == (
+        REPO_ROOT
+        / "shared"
+        / "shared"
+        / "robot_configs"
+        / "urdf"
+        / "ffw_sh5_follower.urdf"
+    )
+    assert urdf_path.exists()
+
+    tree = ET.parse(urdf_path)
+    mesh_filenames = {
+        mesh.attrib["filename"]
+        for mesh in tree.findall(".//mesh")
+        if mesh.attrib.get("filename", "").startswith("package://ffw_description/")
+    }
+    assert mesh_filenames
+
+    asset_root = (
+        REPO_ROOT
+        / "shared"
+        / "shared"
+        / "robot_configs"
+        / "ffw_description"
+    )
+    missing = []
+    for filename in sorted(mesh_filenames):
+        rel_path = filename.removeprefix("package://ffw_description/").replace("//", "/")
+        if not (asset_root / rel_path).exists():
+            missing.append(rel_path)
+
+    assert missing == []
 
 
 def test_tactile_is_optional_for_existing_sg2_config():

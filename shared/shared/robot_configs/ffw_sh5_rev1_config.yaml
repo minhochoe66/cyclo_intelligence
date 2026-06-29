@@ -2,7 +2,7 @@ orchestrator:
   ros__parameters:
     ffw_sh5_rev1:
       robot_name: "FFW SH5 Rev1"
-      urdf_path: ""
+      urdf_path: urdf/ffw_sh5_follower.urdf
 
       # SH5 records ZED head cameras only. Wrist RealSense cameras are not
       # part of the default SH5 recording layout.

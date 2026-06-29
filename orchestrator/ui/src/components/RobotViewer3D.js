@@ -7,6 +7,7 @@ import { useSelector } from 'react-redux';
 import useUrdfRobot from '../hooks/useUrdfRobot';
 import useJointStateSubscription from '../hooks/useJointStateSubscription';
 import { useRosServiceCaller } from '../hooks/useRosServiceCaller';
+import { getFallbackUrdfPath } from '../utils/robotUrdfPaths';
 
 const CAMERA_PRESETS = {
   perspective: { label: 'Perspective' },
@@ -16,17 +17,6 @@ const CAMERA_PRESETS = {
 };
 
 const MIN_USEFUL_MODEL_DIMENSION = 0.15;
-
-const ROBOT_URDF_BASENAMES = {
-  ffw_sg2_rev1: 'ffw_sg2_follower.urdf',
-  ffw_sg2_rev2: 'ffw_sg2_follower.urdf',
-  ffw_bg2_rev4: 'ffw_bg2_rev4_follower.urdf',
-};
-
-function getFallbackUrdfPath(robotType) {
-  const basename = ROBOT_URDF_BASENAMES[robotType];
-  return basename ? `/urdf/urdf/${basename}` : null;
-}
 
 function RobotModel({ robot }) {
   const groupRef = useRef();
