@@ -54,11 +54,13 @@ class BehaviorTreeNode(Node):
         self.tree_execution_mode = 'stopped'
         self.main_tree_path = None
 
-        self.declare_parameter('robot_type', 'ffw_sg2_rev1')
+        self.declare_parameter('robot_type', '')
         self.declare_parameter('tree_xml', '')
         self.declare_parameter('tick_rate', 30.0)
 
         robot_type = self.get_parameter('robot_type').value
+        if not robot_type:
+            raise ValueError('robot_type parameter is required')
         tree_xml = self.get_parameter('tree_xml').value
         tick_rate = self.get_parameter('tick_rate').value
 

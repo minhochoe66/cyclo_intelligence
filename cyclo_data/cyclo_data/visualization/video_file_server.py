@@ -406,11 +406,14 @@ class VideoFileHandler(SimpleHTTPRequestHandler):
         """Handle POST /bt/launch — launch the BT node process."""
         try:
             content_length = int(self.headers.get('Content-Length', 0))
-            robot_type = 'ffw_sg2_rev1'
+            robot_type = ''
             if content_length > 0:
                 body = self.rfile.read(content_length)
                 data = json.loads(body.decode('utf-8'))
                 robot_type = data.get('robot_type', robot_type)
+            if not robot_type:
+                self._send_json_error(400, 'robot_type is required')
+                return
 
             with self._bt_lock:
                 # Check if already running

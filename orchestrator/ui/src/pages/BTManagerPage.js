@@ -155,6 +155,7 @@ export default function BTManagerPage({ isActive = true }) {
   const { callService } = useRosServiceCaller();
   const { catalog: nodeCatalog = [], refreshCatalog } = useBTNodeCatalog();
   const rosbridgeUrl = useSelector((state) => state.ros.rosbridgeUrl);
+  const robotType = useSelector((state) => state.tasks.robotType);
 
   const treeXml = useSelector((state) => state.btmanager.treeXml);
   const treeFileName = useSelector((state) => state.btmanager.treeFileName);
@@ -678,9 +679,12 @@ export default function BTManagerPage({ isActive = true }) {
   const callBtNodeService = useCallback(async (action) => {
     setBtNodePendingAction(action);
     try {
-      const response = await fetch(`${API_BASE}/services/bt_node/${action}`, {
-        method: 'POST',
-      });
+      const init = { method: 'POST' };
+      if (action === 'start') {
+        init.headers = { 'Content-Type': 'application/json' };
+        init.body = JSON.stringify({ robot_type: robotType || '' });
+      }
+      const response = await fetch(`${API_BASE}/services/bt_node/${action}`, init);
       const data = await readJsonResponse(response);
       if (!response.ok || data.ok === false) {
         throw new Error(data.detail || data.message || `${action} failed`);
@@ -689,7 +693,7 @@ export default function BTManagerPage({ isActive = true }) {
     } finally {
       setBtNodePendingAction(null);
     }
-  }, []);
+  }, [robotType]);
 
   const handleBtNodeOn = useCallback(async () => {
     try {

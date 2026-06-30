@@ -51,6 +51,7 @@ export default function useUrdfRobot(urdfPath) {
 
     loader.packages = {
       'ffw_description': '/urdf/ffw_description',
+      'open_manipulator_description': '/urdf/open_manipulator_description',
     };
 
     const makeFallback = (color = 0x888888) => new THREE.Mesh(

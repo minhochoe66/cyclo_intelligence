@@ -397,6 +397,51 @@ class OrchestratorNode(Node):
             setattr(copied, field_name, value)
         return copied
 
+    def _infer_conversion_robot_type(self, roots):
+        """Infer a recorded dataset's robot_type from episode_info.json files."""
+        robot_types = {}
+        for root in roots:
+            root_path = Path(root)
+            if not root_path.exists():
+                continue
+            try:
+                info_paths = (
+                    [root_path]
+                    if root_path.is_file() and root_path.name == 'episode_info.json'
+                    else sorted(root_path.rglob('episode_info.json'))
+                )
+            except Exception as exc:  # noqa: BLE001
+                self.get_logger().warning(
+                    f'Failed to scan {root_path} for episode_info.json: {exc}'
+                )
+                continue
+
+            for info_path in info_paths:
+                try:
+                    with open(info_path, 'r', encoding='utf-8') as f:
+                        info = json.load(f) or {}
+                except Exception as exc:  # noqa: BLE001
+                    self.get_logger().warning(
+                        f'Failed to read {info_path}: {exc}'
+                    )
+                    continue
+
+                robot_type = str(info.get('robot_type') or '').strip()
+                if robot_type:
+                    robot_types.setdefault(robot_type, []).append(str(info_path))
+
+        if len(robot_types) > 1:
+            details = ', '.join(
+                f'{robot_type} ({len(paths)} episodes)'
+                for robot_type, paths in sorted(robot_types.items())
+            )
+            return '', f'Mixed robot_type values in source dataset(s): {details}'
+
+        if not robot_types:
+            return '', ''
+
+        return next(iter(robot_types.keys())), ''
+
     def _get_inference_record_task_info(self) -> Optional[TaskInfo]:
         task_info = self._prepared_inference_task_info
         if task_info is None:
@@ -1496,10 +1541,6 @@ class OrchestratorNode(Node):
 
                 base_path = Path('/workspace/rosbag2')
                 dataset_path = base_path / task_name
-                robot_config_path = os.path.join(
-                    get_package_share_directory('shared'),
-                    'robot_configs', f'{self.robot_type}_config.yaml'
-                )
 
                 if len(source_folders) >= 2:
                     # Merge-then-convert mode — resolve each source.
@@ -1526,6 +1567,52 @@ class OrchestratorNode(Node):
                         response.message = \
                             f'Dataset path does not exist: {dataset_path}'
                         return response
+
+                conversion_sources = (
+                    [Path(src) for src in source_paths]
+                    if source_paths else [dataset_path]
+                )
+                inferred_robot_type, robot_type_error = (
+                    self._infer_conversion_robot_type(conversion_sources)
+                )
+                if robot_type_error:
+                    response.success = False
+                    response.message = robot_type_error
+                    return response
+
+                conversion_robot_type = inferred_robot_type or self.robot_type
+                if not conversion_robot_type:
+                    response.success = False
+                    response.message = (
+                        'CONVERT_MP4 requires a robot_type. Select a robot '
+                        'type and wait for /set_robot_type to complete before '
+                        'converting, or convert a dataset with episode_info.json '
+                        'containing robot_type.'
+                    )
+                    return response
+
+                if (
+                    inferred_robot_type and self.robot_type
+                    and inferred_robot_type != self.robot_type
+                ):
+                    self.get_logger().warning(
+                        'CONVERT_MP4 robot_type mismatch: '
+                        f'current={self.robot_type}, '
+                        f'dataset={inferred_robot_type}; '
+                        f'using dataset robot_type={inferred_robot_type}'
+                    )
+
+                robot_config_path = os.path.join(
+                    get_package_share_directory('shared'),
+                    'robot_configs', f'{conversion_robot_type}_config.yaml'
+                )
+                if not os.path.exists(robot_config_path):
+                    response.success = False
+                    response.message = (
+                        f'Robot config not found for {conversion_robot_type}: '
+                        f'{robot_config_path}'
+                    )
+                    return response
 
                 # Read conversion-only knobs off SendCommand.srv (defaulting
                 # for old UIs that don't yet send these fields). When neither
@@ -1571,7 +1658,7 @@ class OrchestratorNode(Node):
 
                 result = self._cyclo_data.start_conversion(
                     dataset_path=str(dataset_path),
-                    robot_type=self.robot_type,
+                    robot_type=conversion_robot_type,
                     robot_config_path=robot_config_path,
                     source_folders=source_paths,
                     fps=conversion_fps,

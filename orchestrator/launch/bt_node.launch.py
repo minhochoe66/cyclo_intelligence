@@ -31,6 +31,8 @@ from shared.robot_configs import schema as robot_schema
 def launch_setup(context, *args, **kwargs):
 
     robot_type = LaunchConfiguration('robot_type').perform(context)
+    if not robot_type:
+        raise RuntimeError('bt_node.launch.py requires robot_type')
 
     shared_share = get_package_share_directory('shared')
 
@@ -38,9 +40,7 @@ def launch_setup(context, *args, **kwargs):
     robot_config_path = os.path.join(config_dir, f'{robot_type}_config.yaml')
 
     if not os.path.exists(robot_config_path):
-        print(f'Warning: Config file not found: {robot_config_path}')
-        print('Falling back to ffw_sg2_rev1_config.yaml')
-        robot_config_path = os.path.join(config_dir, 'ffw_sg2_rev1_config.yaml')
+        raise FileNotFoundError(f'Config file not found: {robot_config_path}')
 
     # Phase 4 adapter — bt_node + bt_nodes_loader still consume the legacy
     # flat params (`<robot>.joint_list`, `<robot>.joint_topic_list`,
@@ -91,8 +91,8 @@ def generate_launch_description():
 
     robot_type_arg = DeclareLaunchArgument(
         'robot_type',
-        default_value='ffw_sg2_rev1',
-        description='Type of robot (e.g., ffw_sg2_rev1)'
+        default_value='',
+        description='Type of robot matching shared/robot_configs/<robot_type>_config.yaml'
     )
 
     return LaunchDescription([

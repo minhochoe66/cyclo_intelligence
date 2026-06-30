@@ -48,6 +48,7 @@ import asyncio
 import json
 import logging
 import os
+import re
 import subprocess
 import threading
 import time
@@ -75,6 +76,9 @@ _USER_SERVICES: tuple[str, ...] = (
     "bt_node",
     "web_video_server",
 )
+
+_BT_ROBOT_TYPE_FILE = "/run/cyclo_intelligence/bt_node_robot_type"
+_ROBOT_TYPE_RE = re.compile(r"^[A-Za-z0-9_.-]+$")
 
 
 @dataclass
@@ -116,6 +120,21 @@ def _require_known_service(name: str) -> None:
         )
 
 
+def _validate_robot_type(robot_type: str) -> str:
+    normalized = robot_type.strip()
+    if not normalized:
+        raise HTTPException(400, "robot_type is required")
+    if not _ROBOT_TYPE_RE.fullmatch(normalized):
+        raise HTTPException(400, "robot_type contains unsupported characters")
+    return normalized
+
+
+def _write_bt_robot_type(robot_type: str) -> None:
+    os.makedirs(os.path.dirname(_BT_ROBOT_TYPE_FILE), exist_ok=True)
+    with open(_BT_ROBOT_TYPE_FILE, "w", encoding="utf-8") as f:
+        f.write(robot_type + "\n")
+
+
 # -- API models ----------------------------------------------------------------
 
 
@@ -134,6 +153,10 @@ class ServiceList(BaseModel):
 class ActionResult(BaseModel):
     ok: bool
     message: str
+
+
+class ServiceActionRequest(BaseModel):
+    robot_type: str = ""
 
 
 class HealthResponse(BaseModel):
@@ -231,8 +254,23 @@ _BACKENDS: Dict[str, Dict[str, str]] = {
 }
 
 _REQUIRED_BACKEND_MOUNTS: Dict[str, tuple[str, ...]] = {
-    "lerobot": ("/workspace",),
-    "groot": ("/workspace",),
+    "lerobot": (
+        "/workspace",
+        "/robot_client_sdk",
+        "/action_chunk_processing_sdk",
+        "/policy_runtime",
+        "/app/lerobot_engine",
+        "/orchestrator_config",
+    ),
+    "groot": (
+        "/workspace",
+        "/robot_client_sdk",
+        "/action_chunk_processing_sdk",
+        "/policy_runtime",
+        "/app/groot_engine",
+        "/app/runtime",
+        "/orchestrator_config",
+    ),
 }
 
 _GROOT_MODEL_ROOT = "/workspace/model/groot"
@@ -1039,8 +1077,14 @@ async def service_status(name: str) -> ServiceStatus:
 
 
 @app.post("/services/{name}/start", response_model=ActionResult)
-async def service_start(name: str) -> ActionResult:
+async def service_start(
+    name: str,
+    request: Optional[ServiceActionRequest] = None,
+) -> ActionResult:
     _require_known_service(name)
+    if name == "bt_node":
+        robot_type = _validate_robot_type(request.robot_type if request else "")
+        _write_bt_robot_type(robot_type)
     # s6-rc -u change <name> brings the service up (idempotent).
     result = await _run("s6-rc", "-u", "change", name)
     ok = result.rc == 0
