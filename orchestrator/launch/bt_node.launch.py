@@ -62,12 +62,20 @@ def launch_setup(context, *args, **kwargs):
         f'leader_{m}:{cfg["topic"]}'
         for m, cfg in action_groups.items()
     ]
+    joint_topic_type_list = [
+        f'follower_{name}:{cfg["msg_type"]}'
+        for name, cfg in state_groups.items()
+    ] + [
+        f'leader_{m}:{cfg["msg_type"]}'
+        for m, cfg in action_groups.items()
+    ]
 
     bt_params = {
         'robot_type': robot_type,
         'tick_rate': 30.0,
         f'{robot_type}.joint_list': joint_list,
         f'{robot_type}.joint_topic_list': joint_topic_list,
+        f'{robot_type}.joint_topic_type_list': joint_topic_type_list,
     }
     for modality, cfg in action_groups.items():
         bt_params[f'{robot_type}.joint_order.leader_{modality}'] = list(

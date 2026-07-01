@@ -38,8 +38,6 @@ cyclo_data/
 │                              (console_script, Step 7).
 ├── editor/                    Episode edits.
 │   ├── episode_editor.py
-│   └── scripts/               CLI — remove_head_lift_joints
-│                              (console_script, Step 7).
 ├── quality/                   Timestamp gap / drop analysis.
 ├── hub/                       HuggingFace Hub upload / download.
 │   ├── hf_worker.py
@@ -88,12 +86,11 @@ into `/task/status` so the UI doesn't see two topics.
 
 ## Console scripts (Step 7)
 
-`setup.py` registers three entry points (D9 resolved in Step 7):
+`setup.py` registers two entry points (D9 resolved in Step 7):
 
 ```
 visualize_rosbag          → cyclo_data.visualization.scripts.visualize_rosbag:main
 convert_rosbag_to_lerobot → cyclo_data.converter.scripts.convert_rosbag_to_lerobot:main
-remove_head_lift_joints   → cyclo_data.editor.scripts.remove_head_lift_joints:main
 ```
 
 After `colcon build`, run any of these by name:

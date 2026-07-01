@@ -662,20 +662,22 @@ class OrchestratorNode(Node):
             f'Robot control parameters initialized (control_hz={control_hz})')
 
     def clear_parameters(self):
-        if self.communicator is not None:
-            self.communicator.cleanup()
-            self.communicator = None
-
         if self.timer_manager is not None:
+            self.timer_manager.stop_all()
             self.timer_manager = None
 
         if self.heartbeat_timer is not None:
-            self.heartbeat_timer.stop(timer_name='heartbeat')
+            self.heartbeat_timer.stop_all()
             self.heartbeat_timer = None
 
         if self.training_timer is not None:
-            self.training_timer.stop(timer_name='training_status')
+            self.training_timer.stop_all()
             self.training_timer = None
+
+        communicator = self.communicator
+        self.communicator = None
+        if communicator is not None:
+            communicator.cleanup()
 
         self.params = None
         self.robot_section = None
@@ -860,7 +862,11 @@ class OrchestratorNode(Node):
         callback is reduced to a joystick pump and may collapse further
         once Step 4 Brain Migrator finishes inference restructuring.
         """
-        updated, mode = self.communicator.consume_joystick_update()
+        communicator = self.communicator
+        if communicator is None:
+            return
+
+        updated, mode = communicator.consume_joystick_update()
         if updated:
             self.handle_joystick_trigger(joystick_mode=mode)
 
@@ -2043,6 +2049,23 @@ class OrchestratorNode(Node):
         response.robot_type = getattr(self, 'robot_type', '') or ''
         response.robot_name = robot_schema.get_robot_name(self.robot_section)
         response.urdf_path = robot_schema.get_urdf_path(self.robot_section)
+        response.state_joint_topics = robot_schema.get_joint_state_topics(
+            self.robot_section
+        )
+        response.action_topics = robot_schema.get_action_topics(
+            self.robot_section
+        )
+        response.action_topic_types = robot_schema.get_action_topic_types(
+            self.robot_section
+        )
+        response.end_effector_links = (
+            robot_schema.get_visualization_end_effector_links(
+                self.robot_section
+            )
+        )
+        joystick_topics = robot_schema.get_joystick_topics(self.robot_section)
+        response.joystick_trigger_topic = joystick_topics['trigger_topic']
+        response.joystick_mode_topic = joystick_topics['mode_topic']
         response.success = True
         response.message = 'Robot info retrieved successfully'
         return response

@@ -210,12 +210,22 @@ class BehaviorTreeNode(Node):
         joint_topic_list = self.get_parameter(
             f'{robot_type}.joint_topic_list'
         ).value
+        self.declare_parameter(f'{robot_type}.joint_topic_type_list', [''])
+        joint_topic_type_list = self.get_parameter(
+            f'{robot_type}.joint_topic_type_list'
+        ).value
 
         topic_map = {}
         for topic_entry in joint_topic_list:
             if ':' in topic_entry:
                 joint_group, topic = topic_entry.split(':', 1)
                 topic_map[joint_group] = topic
+
+        topic_type_map = {}
+        for topic_type_entry in joint_topic_type_list:
+            if ':' in topic_type_entry:
+                joint_group, msg_type = topic_type_entry.split(':', 1)
+                topic_type_map[joint_group] = msg_type
 
         joint_order = {}
         for joint_name in joint_list:
@@ -227,7 +237,9 @@ class BehaviorTreeNode(Node):
         config = {
             'joint_list': joint_list,
             'joint_topic_list': joint_topic_list,
+            'joint_topic_type_list': joint_topic_type_list,
             'topic_map': topic_map,
+            'topic_type_map': topic_type_map,
             'joint_order': joint_order
         }
 

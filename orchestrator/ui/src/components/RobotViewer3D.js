@@ -16,6 +16,15 @@ const CAMERA_PRESETS = {
 };
 
 const MIN_USEFUL_MODEL_DIMENSION = 0.15;
+const TRAJECTORY_COLORS = ['#38bdf8', '#f472b6', '#34d399', '#fbbf24'];
+
+const EMPTY_ROBOT_INFO = {
+  urdfPath: null,
+  stateJointTopics: [],
+  actionTopics: [],
+  actionTopicTypes: [],
+  endEffectorLinks: [],
+};
 
 function RobotModel({ robot }) {
   const groupRef = useRef();
@@ -36,48 +45,39 @@ function RobotModel({ robot }) {
 
 function TrajectoryPathLines({ paths }) {
   const convertedPaths = useMemo(() => {
-    if (!paths) return { left: [], right: [] };
+    if (!Array.isArray(paths)) return [];
 
     const toArray = (pts) => pts.map((p) => [p.x, p.y, p.z]);
-
-    return {
-      left: paths.left?.length >= 2 ? toArray(paths.left) : [],
-      right: paths.right?.length >= 2 ? toArray(paths.right) : [],
-    };
+    return paths
+      .map((path, index) => ({
+        name: path.name || `Path ${index + 1}`,
+        color: TRAJECTORY_COLORS[index % TRAJECTORY_COLORS.length],
+        points: path.points?.length >= 2 ? toArray(path.points) : [],
+      }))
+      .filter((path) => path.points.length >= 2);
   }, [paths]);
 
   return (
     <>
-      {convertedPaths.left.length >= 2 && (
-        <Line
-          points={convertedPaths.left}
-          color="#38bdf8"
-          lineWidth={3}
-          transparent
-          opacity={0.7}
-        />
-      )}
-      {convertedPaths.right.length >= 2 && (
-        <Line
-          points={convertedPaths.right}
-          color="#f472b6"
-          lineWidth={3}
-          transparent
-          opacity={0.7}
-        />
-      )}
-      {convertedPaths.left.length > 0 && (
-        <mesh position={convertedPaths.left[convertedPaths.left.length - 1]}>
-          <sphereGeometry args={[0.015, 12, 12]} />
-          <meshStandardMaterial color="#38bdf8" emissive="#38bdf8" emissiveIntensity={0.5} />
-        </mesh>
-      )}
-      {convertedPaths.right.length > 0 && (
-        <mesh position={convertedPaths.right[convertedPaths.right.length - 1]}>
-          <sphereGeometry args={[0.015, 12, 12]} />
-          <meshStandardMaterial color="#f472b6" emissive="#f472b6" emissiveIntensity={0.5} />
-        </mesh>
-      )}
+      {convertedPaths.map((path) => (
+        <React.Fragment key={path.name}>
+          <Line
+            points={path.points}
+            color={path.color}
+            lineWidth={3}
+            transparent
+            opacity={0.7}
+          />
+          <mesh position={path.points[path.points.length - 1]}>
+            <sphereGeometry args={[0.015, 12, 12]} />
+            <meshStandardMaterial
+              color={path.color}
+              emissive={path.color}
+              emissiveIntensity={0.5}
+            />
+          </mesh>
+        </React.Fragment>
+      ))}
     </>
   );
 }
@@ -420,18 +420,27 @@ function CameraPresetButtons({ onPreset, activePreset }) {
   );
 }
 
-function TrajectoryLegend({ visible }) {
-  if (!visible) return null;
+function TrajectoryLegend({ visible, paths }) {
+  const entries = Array.isArray(paths)
+    ? paths.filter((path) => path.points?.length > 0)
+    : [];
+  if (!visible || entries.length === 0) return null;
   return (
     <div className="absolute bottom-12 left-2 z-10 flex gap-3 bg-black/50 rounded px-2 py-1">
-      <div className="flex items-center gap-1">
-        <div className="w-4 h-1 rounded bg-sky-400" />
-        <span className="text-xs text-white/70">Left</span>
-      </div>
-      <div className="flex items-center gap-1">
-        <div className="w-4 h-1 rounded bg-pink-400" />
-        <span className="text-xs text-white/70">Right</span>
-      </div>
+      {entries.map((path, index) => {
+        const color = TRAJECTORY_COLORS[index % TRAJECTORY_COLORS.length];
+        return (
+          <div key={path.name || index} className="flex items-center gap-1">
+            <div
+              className="w-4 h-1 rounded"
+              style={{ backgroundColor: color }}
+            />
+            <span className="text-xs text-white/70">
+              {path.name || `Path ${index + 1}`}
+            </span>
+          </div>
+        );
+      })}
     </div>
   );
 }
@@ -477,26 +486,32 @@ export default function RobotViewer3D({
   const globalRobotType = useSelector((state) => state.tasks.robotType);
   const robotType = robotTypeOverride || globalRobotType;
   const { getRobotInfo } = useRosServiceCaller();
-  const [urdfPath, setUrdfPath] = useState(null);
+  const [robotInfo, setRobotInfo] = useState(EMPTY_ROBOT_INFO);
   const [webglAvailable] = useState(() => canCreateWebGLContext());
 
   useEffect(() => {
     if (!webglAvailable || !robotType) {
-      setUrdfPath(null);
+      setRobotInfo(EMPTY_ROBOT_INFO);
       return;
     }
-    setUrdfPath(null);
+    setRobotInfo(EMPTY_ROBOT_INFO);
 
     let cancelled = false;
     (async () => {
       try {
         const info = await getRobotInfo();
-        if (cancelled || !info?.success || !info.urdf_path) return;
+        if (cancelled || !info?.success) return;
         // Orchestrator returns an absolute filesystem path under
         // shared/robot_configs/urdf/. nginx serves the same directory at
         // /urdf/urdf/ so map basename onto that prefix.
-        const basename = info.urdf_path.split('/').pop();
-        if (basename) setUrdfPath(`/urdf/urdf/${basename}`);
+        const basename = info.urdf_path?.split('/').pop();
+        setRobotInfo({
+          urdfPath: basename ? `/urdf/urdf/${basename}` : null,
+          stateJointTopics: info.state_joint_topics || [],
+          actionTopics: info.action_topics || [],
+          actionTopicTypes: info.action_topic_types || [],
+          endEffectorLinks: info.end_effector_links || [],
+        });
       } catch (e) {
         console.warn('Robot info lookup failed; no URDF will be shown:', e);
       }
@@ -507,7 +522,26 @@ export default function RobotViewer3D({
   }, [robotType, getRobotInfo, webglAvailable]);
 
   const { robot, loading, error, setJointValues, computeTrajectoryPaths, reload } = useUrdfRobot(
-    webglAvailable ? urdfPath : null
+    webglAvailable ? robotInfo.urdfPath : null,
+    robotInfo.endEffectorLinks
+  );
+  const liveStateTopics = useMemo(
+    () => robotInfo.stateJointTopics.map((name) => ({
+      name,
+      type: 'sensor_msgs/msg/JointState',
+    })),
+    [robotInfo.stateJointTopics]
+  );
+  const liveActionTopics = useMemo(
+    () => robotInfo.actionTopics
+      .map((name, index) => ({
+        name,
+        type: robotInfo.actionTopicTypes[index] || '',
+      }))
+      .filter((topic) => (
+        topic.name && topic.type === 'trajectory_msgs/msg/JointTrajectory'
+      )),
+    [robotInfo.actionTopics, robotInfo.actionTopicTypes]
   );
   const cameraRef = useRef();
   const [activePreset, setActivePreset] = useState('perspective');
@@ -530,7 +564,7 @@ export default function RobotViewer3D({
     if (!data?.names?.length || !data?.points?.length) return;
 
     const paths = computeTrajectoryPaths(data);
-    if (paths.left.length > 0 || paths.right.length > 0) {
+    if (Array.isArray(paths) && paths.some((path) => path.points.length > 0)) {
       setTrajectoryPaths(paths);
       setHasTrajectory(true);
     }
@@ -551,6 +585,8 @@ export default function RobotViewer3D({
       visualizationSource,
       liveUpdateHz,
       enableActionPreview: showSourceSelector,
+      stateTopics: liveStateTopics,
+      actionTopics: liveActionTopics,
     },
   );
 
@@ -584,7 +620,7 @@ export default function RobotViewer3D({
       {loading && <LoadingOverlay />}
       {error && <ErrorOverlay message={error} onRetry={reload} />}
       <CameraPresetButtons onPreset={handlePreset} activePreset={activePreset} />
-      <TrajectoryLegend visible={hasTrajectory} />
+      <TrajectoryLegend visible={hasTrajectory} paths={trajectoryPaths} />
       <SourceSelector
         visible={mode === 'live' && showSourceSelector}
         value={visualizationSource}

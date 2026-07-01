@@ -3,6 +3,9 @@ orchestrator:
     omx_f:
       robot_name: "OMX F"
       urdf_path: urdf/omx_f.urdf
+      visualization:
+        end_effector_links:
+          - end_effector_link
 
       # ────────────────────────────────────────────────────────────────
       # Observation — every signal the policy reads from the robot.
