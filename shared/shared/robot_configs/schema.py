@@ -91,6 +91,15 @@ def find_robot_config_path(
 
     here = Path(__file__).resolve()
     for parent in here.parents:
+        cand = (
+            parent / "share" / "shared" / "robot_configs" /
+            f"{robot_type}_config.yaml"
+        )
+        if cand.exists():
+            candidates.append(cand)
+            break
+
+    for parent in here.parents:
         cand = parent / "shared" / "robot_configs" / f"{robot_type}_config.yaml"
         if cand.exists():
             candidates.append(cand)
@@ -205,6 +214,25 @@ def get_action_joint_names(section: Dict[str, Any]) -> Dict[str, List[str]]:
     return {m: cfg["joint_names"] for m, cfg in get_action_groups(section).items()}
 
 
+def get_joint_state_topics(section: Dict[str, Any]) -> List[str]:
+    """State topics that publish ``sensor_msgs/msg/JointState`` messages."""
+    topics: List[str] = []
+    for cfg in get_state_groups(section).values():
+        if cfg.get("msg_type") == "sensor_msgs/msg/JointState":
+            topics.append(cfg["topic"])
+    return topics
+
+
+def get_action_topics(section: Dict[str, Any]) -> List[str]:
+    """Action command topics in config order."""
+    return [cfg["topic"] for cfg in get_action_groups(section).values()]
+
+
+def get_action_topic_types(section: Dict[str, Any]) -> List[str]:
+    """Action command message types in config order."""
+    return [cfg["msg_type"] for cfg in get_action_groups(section).values()]
+
+
 def get_recording_extra_topics(section: Dict[str, Any]) -> List[str]:
     extras = (section.get("recording") or {}).get("extra_topics") or []
     return [t for t in extras if t]
@@ -310,3 +338,18 @@ def get_urdf_path(section: Dict[str, Any]) -> str:
 
 def get_robot_name(section: Dict[str, Any]) -> str:
     return str(section.get("robot_name") or "")
+
+
+def get_visualization_end_effector_links(section: Dict[str, Any]) -> List[str]:
+    """URDF links used for live trajectory path rendering."""
+    links = (section.get("visualization") or {}).get("end_effector_links") or []
+    return [str(link) for link in links if link]
+
+
+def get_joystick_topics(section: Dict[str, Any]) -> Dict[str, str]:
+    """Optional joystick integration topics for record triggers and UI mode."""
+    joystick = section.get("joystick") or {}
+    return {
+        "trigger_topic": str(joystick.get("trigger_topic") or ""),
+        "mode_topic": str(joystick.get("mode_topic") or ""),
+    }

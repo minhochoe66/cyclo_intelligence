@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-export const FALLBACK_SCHEMA_VERSION = '1.0';
+export const FALLBACK_SCHEMA_VERSION = '1.1';
 
 export const FALLBACK_CATALOG = [
   {
@@ -38,6 +38,8 @@ export const FALLBACK_CATALOG = [
     tag: 'JointControl',
     category: 'action',
     ports: [
+      { name: 'groups', type: 'string', default: '' },
+      { name: 'positions', type: 'string', default: '' },
       { name: 'enable_head', type: 'bool', default: 'true' },
       { name: 'head_positions', type: 'string', default: '0.0, 0.0' },
       { name: 'enable_arms', type: 'bool', default: 'false' },

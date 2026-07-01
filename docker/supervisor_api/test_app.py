@@ -52,10 +52,14 @@ _backend_container_stale_reason = app._backend_container_stale_reason
 _compose_env = app._compose_env
 _host_workspace_dir = app._host_workspace_dir
 _require_known_service = app._require_known_service
+_validate_robot_type = app._validate_robot_type
+_write_bt_robot_type = app._write_bt_robot_type
 _resolve_groot_trt_paths = app._resolve_groot_trt_paths
 _trt_status = app._trt_status
 _BACKENDS = app._BACKENDS
 _USER_SERVICES = app._USER_SERVICES
+_GROOT_REQUIRED_MOUNTS = app._REQUIRED_BACKEND_MOUNTS["groot"]
+_LEROBOT_REQUIRED_MOUNTS = app._REQUIRED_BACKEND_MOUNTS["lerobot"]
 
 
 def _container_with_mounts(*destinations):
@@ -72,17 +76,19 @@ def _container_with_mounts(*destinations):
 def test_missing_required_mounts_reports_stale_groot_container():
     container = _container_with_mounts("/legacy_model_mount/groot")
 
-    assert _missing_required_mounts("groot", container) == [
-        "/workspace"
-    ]
+    assert _missing_required_mounts("groot", container) == list(_GROOT_REQUIRED_MOUNTS)
 
 
 def test_missing_required_mounts_accepts_current_groot_container():
-    container = _container_with_mounts(
-        "/workspace",
-    )
+    container = _container_with_mounts(*_GROOT_REQUIRED_MOUNTS)
 
     assert _missing_required_mounts("groot", container) == []
+
+
+def test_missing_required_mounts_accepts_current_lerobot_container():
+    container = _container_with_mounts(*_LEROBOT_REQUIRED_MOUNTS)
+
+    assert _missing_required_mounts("lerobot", container) == []
 
 
 def test_backend_container_image_mismatch_detects_old_container_image():
@@ -131,6 +137,11 @@ def test_backend_container_stale_reason_detects_workspace_mount_mismatch():
                     "Destination": "/workspace",
                     "Source": "/home/robot/old_workspace",
                 },
+                *[
+                    {"Destination": destination}
+                    for destination in _GROOT_REQUIRED_MOUNTS
+                    if destination != "/workspace"
+                ],
             ],
         }
     )
@@ -173,6 +184,11 @@ def test_backend_container_stale_reason_accepts_repo_symlink_workspace_mount(
                     "Destination": "/workspace",
                     "Source": str(host_repo / "docker" / "workspace"),
                 },
+                *[
+                    {"Destination": destination}
+                    for destination in _GROOT_REQUIRED_MOUNTS
+                    if destination != "/workspace"
+                ],
             ],
         }
     )
@@ -514,6 +530,24 @@ def test_relocate_script_migrates_without_overwriting_ssd(tmp_path):
 
 def test_bt_node_is_known_user_service():
     _require_known_service("bt_node")
+
+
+def test_bt_node_robot_type_file_is_written(monkeypatch, tmp_path):
+    target = tmp_path / "bt_node_robot_type"
+    monkeypatch.setattr(app, "_BT_ROBOT_TYPE_FILE", str(target))
+
+    _write_bt_robot_type("omy_f3m")
+
+    assert target.read_text() == "omy_f3m\n"
+
+
+def test_robot_type_validation_rejects_shell_metacharacters():
+    try:
+        _validate_robot_type("omy_f3m;echo bad")
+    except app.HTTPException as exc:
+        assert exc.status_code == 400
+    else:
+        raise AssertionError("invalid robot_type should be rejected")
 
 
 def test_unknown_user_service_is_rejected():
