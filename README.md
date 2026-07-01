@@ -79,27 +79,6 @@ Zenoh router IP changes. s6-managed services and interactive shells source the
 same file so manual ROS commands and policy servers use one configuration
 source.
 
-### Troubleshooting
-
-- **`personal access token is expired` on pull** — A previous `docker
-  login` left an expired token in `~/.docker/config.json`. Run
-  `docker logout` to clear it; the published images pull anonymously.
-- **`Default Runtime: runc` instead of `nvidia`** — Install the NVIDIA
-  Container Toolkit and set `nvidia` as the default runtime in
-  `/etc/docker/daemon.json`, then `sudo systemctl restart docker`.
-- **Use SSD storage on a robot** — containers always mount
-  `docker/workspace` and `docker/huggingface`. On robots with NVMe storage,
-  `docker/container.sh start` uses `/mnt/ssd/cyclo_intelligence` when that
-  path is writable by replacing those repo-local paths with symlinks. Existing
-  local-only files are migrated to SSD without overwriting files already on
-  SSD; any remaining local conflicts are preserved next to the original path.
-  Use
-  `CYCLO_STORAGE_MODE=ssd` to require SSD storage, or
-  `CYCLO_STORAGE_MODE=local` to keep repo-local directories.
-- **`/var/run/robotis/agent_sockets/...: permission denied`** —
-  `container.sh` will create this with `mkdir -p` (using `sudo` if
-  needed). If sudo prompts, grant once or pre-create the directory.
-
 ## Architecture
 
 See [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) for runtime topology
