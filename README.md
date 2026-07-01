@@ -64,6 +64,21 @@ both Jetson and an AMD64 workstation. The default `start*` flow uses the
 pre-built image from Docker Hub. Pass `--build` to rebuild from local
 Dockerfile (only needed when iterating on Dockerfile changes).
 
+### ROS/Zenoh runtime env
+
+Runtime ROS/Zenoh settings are shared through:
+
+```bash
+docker/workspace/config/ros_zenoh.env
+```
+
+`container.sh start*` creates this file from the shared default
+[`docker/config/ros_zenoh.default.env`](docker/config/ros_zenoh.default.env) if
+it is missing. Edit the workspace runtime file when `ROS_DOMAIN_ID` or the
+Zenoh router IP changes. s6-managed services and interactive shells source the
+same file so manual ROS commands and policy servers use one configuration
+source.
+
 ### Troubleshooting
 
 - **`personal access token is expired` on pull** — A previous `docker

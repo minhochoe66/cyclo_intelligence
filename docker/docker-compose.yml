@@ -72,6 +72,10 @@ services:
       - QT_X11_NO_MITSHM=1
       - ROS_DOMAIN_ID=${ROS_DOMAIN_ID:-30}
       - RMW_IMPLEMENTATION=rmw_zenoh_cpp
+      # Runtime scripts source this file after container env. Edit the
+      # host copy at docker/workspace/config/ros_zenoh.env when the
+      # Zenoh router IP/domain changes.
+      - CYCLO_ROS_ENV_FILE=/workspace/config/ros_zenoh.env
       # Cyclo does not start rmw_zenohd. This points at the external router.
       - ZENOH_ROUTER_IP=127.0.0.1
       - ZENOH_ROUTER_PORT=7447
@@ -87,6 +91,8 @@ services:
       - /dev:/dev
       - /dev/shm:/dev/shm
       - ./workspace:/workspace
+      # Keep s6 ROS/Zenoh env sourcing in sync even when using pre-built images.
+      - ./s6-services/common/ros2_service_run.sh:/usr/local/lib/s6-services/ros2_service_run.sh:ro
       - ./huggingface:/root/.cache/huggingface
       # Model dropboxes live under /workspace/model/{lerobot,groot}.
       - /tmp/.X11-unix:/tmp/.X11-unix:rw
@@ -176,6 +182,10 @@ services:
     # InferenceCommand.LOAD, then configures its local RobotClient command path.
     environment:
       - ROS_DOMAIN_ID=${ROS_DOMAIN_ID:-30}
+      # Runtime scripts source this file after container env. Edit the
+      # host copy at docker/workspace/config/ros_zenoh.env when the
+      # Zenoh router IP/domain changes.
+      - CYCLO_ROS_ENV_FILE=/workspace/config/ros_zenoh.env
       - ZENOH_ROUTER_IP=127.0.0.1
       - ZENOH_ROUTER_PORT=7447
       - ZENOH_SDK_PATH=/zenoh_sdk
@@ -293,6 +303,10 @@ services:
 
     environment:
       - ROS_DOMAIN_ID=${ROS_DOMAIN_ID:-30}
+      # Runtime scripts source this file after container env. Edit the
+      # host copy at docker/workspace/config/ros_zenoh.env when the
+      # Zenoh router IP/domain changes.
+      - CYCLO_ROS_ENV_FILE=/workspace/config/ros_zenoh.env
       - ZENOH_ROUTER_IP=127.0.0.1
       - ZENOH_ROUTER_PORT=7447
       - ZENOH_SDK_PATH=/zenoh_sdk

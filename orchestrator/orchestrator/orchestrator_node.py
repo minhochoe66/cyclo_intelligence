@@ -136,6 +136,9 @@ class OrchestratorNode(Node):
         # UI service callbacks and joystick subscriptions can both forward
         # recording commands; serialize those calls without holding state_lock.
         self._recording_command_lock = threading.Lock()
+        # LOAD/START and STOP/UNLOAD must not cross in flight. The UI can send
+        # Clear then Start faster than the policy container can release CUDA.
+        self._inference_lifecycle_lock = threading.Lock()
 
         self.params = None
         self.robot_section = None
@@ -1448,54 +1451,99 @@ class OrchestratorNode(Node):
 
                     def _load_and_start():
                         try:
-                            load_result = client.inference_command(
-                                ContainerServiceClient.CMD_LOAD,
-                                model_path=model_path,
-                                embodiment_tag='new_embodiment',
-                                robot_type=robot_type,
-                                task_instruction=task_instruction,
-                                publish_to_robot=publish_to_robot,
-                                acceleration_mode=requested_acceleration_mode,
-                                acceleration_engine_path=(
-                                    requested_acceleration_engine_path
-                                ),
-                                action_request_mode=requested_action_request_mode,
-                            )
-                            if not load_result.success:
-                                self.get_logger().error(
-                                    f'Async LOAD failed: {load_result.message}'
+                            def _call_load():
+                                return client.inference_command(
+                                    ContainerServiceClient.CMD_LOAD,
+                                    model_path=model_path,
+                                    embodiment_tag='new_embodiment',
+                                    robot_type=robot_type,
+                                    task_instruction=task_instruction,
+                                    publish_to_robot=publish_to_robot,
+                                    acceleration_mode=requested_acceleration_mode,
+                                    acceleration_engine_path=(
+                                        requested_acceleration_engine_path
+                                    ),
+                                    action_request_mode=requested_action_request_mode,
                                 )
-                                self._teardown_inference_client()
-                                self._publish_inference_phase(
-                                    InferenceStatus.READY, error=load_result.message
-                                )
-                                return
 
-                            action_keys = load_result.data.get('action_keys', [])
-                            self.get_logger().info(
-                                f'LOAD ok action_keys={action_keys}'
-                            )
+                            with self._inference_lifecycle_lock:
+                                with self._state_lock:
+                                    if self.container_service_client is not client:
+                                        return
 
-                            start_result = client.inference_command(
-                                ContainerServiceClient.CMD_START,
-                                publish_to_robot=publish_to_robot,
-                            )
-                            if not start_result.success:
-                                self.get_logger().error(
-                                    f'Async START failed: {start_result.message}'
-                                )
-                                self._teardown_inference_client()
-                                self._publish_inference_phase(
-                                    InferenceStatus.READY, error=start_result.message
-                                )
-                                return
+                                load_result = _call_load()
+                                if (
+                                    not load_result.success
+                                    and self._is_policy_already_loaded_message(
+                                        load_result.message
+                                    )
+                                ):
+                                    self.get_logger().warning(
+                                        'Policy container reports an already '
+                                        'loaded model; issuing STOP/UNLOAD '
+                                        'before retrying LOAD'
+                                    )
+                                    stop_result = client.inference_command(
+                                        ContainerServiceClient.CMD_STOP
+                                    )
+                                    if not stop_result.success:
+                                        self.get_logger().warning(
+                                            'STOP before LOAD retry failed: '
+                                            f'{stop_result.message}'
+                                        )
+                                    unload_result = client.inference_command(
+                                        ContainerServiceClient.CMD_UNLOAD
+                                    )
+                                    if not unload_result.success:
+                                        self.get_logger().warning(
+                                            'UNLOAD before LOAD retry failed: '
+                                            f'{unload_result.message}'
+                                        )
+                                    load_result = _call_load()
 
-                            self._set_session_active(
-                                on_inference=True,
-                                start_time=time.perf_counter(),
-                            )
-                            with self._state_lock:
-                                if self.container_service_client is client:
+                                if not load_result.success:
+                                    self.get_logger().error(
+                                        f'Async LOAD failed: {load_result.message}'
+                                    )
+                                    self._teardown_inference_client(
+                                        expected_client=client
+                                    )
+                                    self._publish_inference_phase(
+                                        InferenceStatus.READY,
+                                        error=load_result.message,
+                                    )
+                                    return
+
+                                with self._state_lock:
+                                    if self.container_service_client is not client:
+                                        return
+
+                                action_keys = load_result.data.get('action_keys', [])
+                                self.get_logger().info(
+                                    f'LOAD ok action_keys={action_keys}'
+                                )
+
+                                start_result = client.inference_command(
+                                    ContainerServiceClient.CMD_START,
+                                    publish_to_robot=publish_to_robot,
+                                )
+                                if not start_result.success:
+                                    self.get_logger().error(
+                                        f'Async START failed: {start_result.message}'
+                                    )
+                                    self._teardown_inference_client(
+                                        expected_client=client
+                                    )
+                                    self._publish_inference_phase(
+                                        InferenceStatus.READY,
+                                        error=start_result.message,
+                                    )
+                                    return
+
+                                with self._state_lock:
+                                    if self.container_service_client is not client:
+                                        return
+
                                     self._loaded_inference_policy_path = (
                                         normalized_model_path
                                     )
@@ -1511,13 +1559,22 @@ class OrchestratorNode(Node):
                                     self._loaded_inference_action_request_mode = (
                                         requested_action_request_mode
                                     )
-                            self._publish_inference_phase(InferenceStatus.INFERENCING)
+
+                                self._set_session_active(
+                                    on_inference=True,
+                                    start_time=time.perf_counter(),
+                                )
+                                self._publish_inference_phase(
+                                    InferenceStatus.INFERENCING
+                                )
                         except Exception as e:
                             self.get_logger().error(
                                 f'Async LOAD/START error: {e}', exc_info=True
                             )
                             try:
-                                self._teardown_inference_client()
+                                self._teardown_inference_client(
+                                    expected_client=client
+                                )
                                 self._publish_inference_phase(
                                     InferenceStatus.READY, error=str(e)
                                 )
@@ -2403,6 +2460,11 @@ class OrchestratorNode(Node):
         return os.path.normpath(value)
 
     @staticmethod
+    def _is_policy_already_loaded_message(message: str) -> bool:
+        value = str(message or '').lower()
+        return 'already loaded' in value and 'unload' in value
+
+    @staticmethod
     def _normalize_acceleration_mode(value: str) -> str:
         mode = str(value or '').strip().lower()
         if mode in {'', 'none', 'off', 'false', 'pytorch', 'eager'}:
@@ -2483,7 +2545,7 @@ class OrchestratorNode(Node):
         # Default to groot for backward compatibility
         return '/groot'
 
-    def _teardown_inference_client(self):
+    def _teardown_inference_client(self, expected_client=None):
         """Tear down the container service client (STOP + UNLOAD + disconnect).
 
         Called on inference session end (FINISH), on LOAD/START failure so
@@ -2497,6 +2559,8 @@ class OrchestratorNode(Node):
         # both grab the same client and double-disconnect.
         with self._state_lock:
             client = self.container_service_client
+            if expected_client is not None and client is not expected_client:
+                return
             self.container_service_client = None
             self._loaded_inference_policy_path = ''
             self._loaded_inference_publish_to_robot = False
@@ -2508,8 +2572,9 @@ class OrchestratorNode(Node):
 
         def _cleanup():
             try:
-                client.inference_command(ContainerServiceClient.CMD_STOP)
-                client.inference_command(ContainerServiceClient.CMD_UNLOAD)
+                with self._inference_lifecycle_lock:
+                    client.inference_command(ContainerServiceClient.CMD_STOP)
+                    client.inference_command(ContainerServiceClient.CMD_UNLOAD)
             except Exception as e:
                 self.get_logger().error(f'Error tearing down inference: {e}')
             finally:
