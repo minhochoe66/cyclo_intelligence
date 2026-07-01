@@ -519,7 +519,7 @@ Environment:
   FLASH_ATTN_CUDA_ARCHS
                    CUDA archs for GR00T Blackwell flash-attn builds
                    (default 120)
-  VERSION          image tag version (default: 1.0.0 for cyclo)
+  VERSION          image tag version (default: 1.1.0 for cyclo)
   ROS_DOMAIN_ID    default 30
   docker/config/ros_zenoh.default.env
                    Shared default copied into the workspace on first start.
