@@ -244,9 +244,10 @@ class JointControl(BaseAction):
             for ch in self._channels
         )
 
-        self._joint_states = {}
+        self._joint_state_topics = self._configured_joint_state_topics()
+        self._joint_states = self._empty_joint_states()
         self.joint_state_subscriptions = []
-        for topic in self._configured_joint_state_topics():
+        for topic in self._joint_state_topics:
             sub = self.node.create_subscription(
                 JointState,
                 topic,
@@ -449,10 +450,14 @@ class JointControl(BaseAction):
                 topics.append(topic)
         return topics
 
+    def _empty_joint_states(self) -> dict[str, Optional[JointState]]:
+        return {topic: None for topic in self._joint_state_topics}
+
     # -- ROS callbacks --------------------------------------------------------
 
     def _joint_state_callback(self, topic_name, msg):
-        self._joint_states[topic_name] = msg
+        if topic_name in self._joint_states:
+            self._joint_states[topic_name] = msg
 
     # -- Control loop ---------------------------------------------------------
 
@@ -468,6 +473,8 @@ class JointControl(BaseAction):
     def _name_to_position(self) -> dict[str, float]:
         result = {}
         for msg in self._joint_states.values():
+            if msg is None:
+                continue
             for idx, name in enumerate(msg.name):
                 if idx < len(msg.position):
                     result[name] = msg.position[idx]
@@ -500,7 +507,7 @@ class JointControl(BaseAction):
             not self._stop_event.is_set()
             and timeout_count < self._timeout_ticks
         ):
-            if not self._joint_states:
+            if not any(msg is not None for msg in self._joint_states.values()):
                 time.sleep(rate_sleep)
                 timeout_count += 1
                 continue
@@ -530,7 +537,7 @@ class JointControl(BaseAction):
 
     def tick(self) -> NodeStatus:
         if self._thread is None:
-            self._joint_states = {}
+            self._joint_states = self._empty_joint_states()
             self._missing_joint_names = set()
             self._stop_event.clear()
             with self._lock:
@@ -557,4 +564,4 @@ class JointControl(BaseAction):
         self._thread = None
         with self._lock:
             self._result = None
-        self._joint_states = {}
+        self._joint_states = self._empty_joint_states()

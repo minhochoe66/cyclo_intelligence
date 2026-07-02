@@ -93,3 +93,40 @@ def test_tactile_is_optional_for_existing_sg2_config():
     assert robot_schema.get_tactile_topics(section) == {}
     assert "/left_hand/finger_pressures" not in robot_schema.get_mcap_record_topics(section)
     assert "/right_hand/finger_pressures" not in robot_schema.get_mcap_record_topics(section)
+
+
+def test_malformed_topic_entries_are_ignored():
+    section = {
+        "observation": {
+            "images": {
+                "missing_topic": {
+                    "msg_type": "sensor_msgs/msg/CompressedImage",
+                },
+            },
+            "state": {
+                "missing_topic": {
+                    "msg_type": "sensor_msgs/msg/JointState",
+                    "joint_names": ["joint_a"],
+                },
+            },
+            "tactile": {
+                "missing_topic": {
+                    "msg_type": "robotis_interfaces/msg/HandPressures",
+                },
+            },
+        },
+        "action": {
+            "missing_topic": {
+                "msg_type": "trajectory_msgs/msg/JointTrajectory",
+                "joint_names": ["joint_a"],
+            },
+        },
+    }
+
+    assert robot_schema.get_image_topics(section) == {}
+    assert robot_schema.get_state_groups(section) == {}
+    assert robot_schema.get_tactile_topics(section) == {}
+    assert robot_schema.get_action_groups(section) == {}
+    assert robot_schema.get_joint_state_topics(section) == []
+    assert robot_schema.get_action_topics(section) == []
+    assert robot_schema.get_action_topic_types(section) == []

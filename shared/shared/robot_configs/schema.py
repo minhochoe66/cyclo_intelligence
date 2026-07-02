@@ -160,7 +160,7 @@ def get_image_topics(section: Dict[str, Any]) -> Dict[str, Dict[str, Any]]:
     images = (section.get("observation") or {}).get("images") or {}
     result: Dict[str, Dict[str, Any]] = {}
     for name, cfg in images.items():
-        if not isinstance(cfg, dict):
+        if not isinstance(cfg, dict) or "topic" not in cfg:
             continue
         entry: Dict[str, Any] = {
             "topic": cfg["topic"],
@@ -183,7 +183,7 @@ def get_state_groups(section: Dict[str, Any]) -> Dict[str, Dict[str, Any]]:
     groups = (section.get("observation") or {}).get("state") or {}
     result: Dict[str, Dict[str, Any]] = {}
     for name, cfg in groups.items():
-        if not isinstance(cfg, dict):
+        if not isinstance(cfg, dict) or "topic" not in cfg:
             continue
         result[name] = {
             "topic": cfg["topic"],
@@ -203,7 +203,7 @@ def get_tactile_topics(section: Dict[str, Any]) -> Dict[str, Dict[str, Any]]:
     tactile = (section.get("observation") or {}).get("tactile") or {}
     result: Dict[str, Dict[str, Any]] = {}
     for name, cfg in tactile.items():
-        if not isinstance(cfg, dict):
+        if not isinstance(cfg, dict) or "topic" not in cfg:
             continue
         result[name] = {
             "topic": cfg["topic"],
@@ -225,7 +225,7 @@ def get_action_groups(section: Dict[str, Any]) -> Dict[str, Dict[str, Any]]:
     actions = section.get("action") or {}
     result: Dict[str, Dict[str, Any]] = {}
     for modality, cfg in actions.items():
-        if not isinstance(cfg, dict):
+        if not isinstance(cfg, dict) or "topic" not in cfg:
             continue
         result[modality] = {
             "topic": cfg["topic"],
