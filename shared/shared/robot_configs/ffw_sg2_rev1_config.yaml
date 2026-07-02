@@ -3,10 +3,6 @@ orchestrator:
     ffw_sg2_rev1:
       robot_name: "FFW SG2 Rev1"
       urdf_path: urdf/ffw_sg2_follower.urdf
-      visualization:
-        end_effector_links:
-          - end_effector_l_link
-          - end_effector_r_link
       joystick:
         trigger_topic: /leader/joystick_controller/tact_trigger
         mode_topic: /leader/joystick_controller_right/joystick_mode

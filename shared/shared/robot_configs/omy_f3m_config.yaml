@@ -3,9 +3,6 @@ orchestrator:
     omy_f3m:
       robot_name: "OMY F3M"
       urdf_path: urdf/omy_f3m.urdf
-      visualization:
-        end_effector_links:
-          - end_effector_link
 
       # ────────────────────────────────────────────────────────────────
       # Observation — every signal the policy reads from the robot.
