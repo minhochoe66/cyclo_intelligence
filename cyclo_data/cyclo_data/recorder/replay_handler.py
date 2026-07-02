@@ -134,7 +134,14 @@ class ReplayDataHandler:
                 ]
             )
 
-        config_path = next((path for path in candidates if path.exists()), None)
+        config_path = None
+        for path in candidates:
+            try:
+                if path.exists():
+                    config_path = path
+                    break
+            except OSError:
+                continue
         if config_path is None:
             self._log_error(
                 f"replay: robot config for {robot_type} not found; searched "
@@ -147,7 +154,18 @@ class ReplayDataHandler:
                 raw = yaml.safe_load(f) or {}
             section = raw["orchestrator"]["ros__parameters"][robot_type]
             observation = section.get("observation") or {}
+            urdf_path = str(section.get("urdf_path") or "")
+            if urdf_path:
+                path = Path(urdf_path)
+                if not path.is_absolute():
+                    urdf_path = str((config_path.parent / path).resolve())
             return {
+                "urdf_path": urdf_path,
+                "end_effector_links": list(
+                    ((section.get("visualization") or {}).get(
+                        "end_effector_links"
+                    ) or [])
+                ),
                 "state": observation.get("state") or {},
                 "action": section.get("action") or {},
             }
@@ -279,6 +297,8 @@ class ReplayDataHandler:
             "end_time": 0.0,
             "duration": 0.0,
             "robot_type": "",
+            "urdf_path": "",
+            "end_effector_links": [],
             "metadata": None,
             # Extended metadata fields
             "recording_date": None,
@@ -315,6 +335,10 @@ class ReplayDataHandler:
             result["robot_type"] = str(episode_info.get("robot_type") or "")
 
         semantic_layout = self._load_robot_semantic_layout(result["robot_type"])
+        result["urdf_path"] = str(semantic_layout.get("urdf_path") or "")
+        result["end_effector_links"] = list(
+            semantic_layout.get("end_effector_links") or []
+        )
         state_topic_order_config, state_names_by_topic_config = (
             self._topic_name_layout(semantic_layout.get("state"))
         )

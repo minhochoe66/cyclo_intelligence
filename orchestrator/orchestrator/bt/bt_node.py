@@ -42,6 +42,9 @@ from orchestrator.bt.node_registry import (  # noqa: I100
 )
 
 
+SUPPORTED_BT_ROBOT_TYPE = 'ffw_sg2_rev1'
+
+
 class BehaviorTreeNode(Node):
     """ROS 2 node that loads and executes behavior trees."""
 
@@ -54,13 +57,19 @@ class BehaviorTreeNode(Node):
         self.tree_execution_mode = 'stopped'
         self.main_tree_path = None
 
-        self.declare_parameter('robot_type', '')
+        self.declare_parameter('robot_type', SUPPORTED_BT_ROBOT_TYPE)
         self.declare_parameter('tree_xml', '')
         self.declare_parameter('tick_rate', 30.0)
 
-        robot_type = self.get_parameter('robot_type').value
-        if not robot_type:
-            raise ValueError('robot_type parameter is required')
+        robot_type = (
+            str(self.get_parameter('robot_type').value or '').strip()
+            or SUPPORTED_BT_ROBOT_TYPE
+        )
+        if robot_type != SUPPORTED_BT_ROBOT_TYPE:
+            raise ValueError(
+                'BT currently supports only '
+                f'{SUPPORTED_BT_ROBOT_TYPE}; got {robot_type}'
+            )
         tree_xml = self.get_parameter('tree_xml').value
         tick_rate = self.get_parameter('tick_rate').value
 

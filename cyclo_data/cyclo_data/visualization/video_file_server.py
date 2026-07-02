@@ -30,6 +30,7 @@ import threading
 # on a video file hits this path and re.match() would otherwise recompile
 # the pattern per request.
 _RANGE_RE = re.compile(r'bytes=(\d*)-(\d*)')
+_BT_SUPPORTED_ROBOT_TYPE = 'ffw_sg2_rev1'
 from http.server import HTTPServer, SimpleHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Optional
@@ -406,13 +407,18 @@ class VideoFileHandler(SimpleHTTPRequestHandler):
         """Handle POST /bt/launch — launch the BT node process."""
         try:
             content_length = int(self.headers.get('Content-Length', 0))
-            robot_type = ''
+            robot_type = _BT_SUPPORTED_ROBOT_TYPE
             if content_length > 0:
                 body = self.rfile.read(content_length)
                 data = json.loads(body.decode('utf-8'))
                 robot_type = data.get('robot_type', robot_type)
-            if not robot_type:
-                self._send_json_error(400, 'robot_type is required')
+            robot_type = str(robot_type or '').strip()
+            if robot_type != _BT_SUPPORTED_ROBOT_TYPE:
+                self._send_json_error(
+                    400,
+                    'BT currently supports only '
+                    f'{_BT_SUPPORTED_ROBOT_TYPE}',
+                )
                 return
 
             with self._bt_lock:

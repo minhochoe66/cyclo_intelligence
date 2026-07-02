@@ -400,6 +400,14 @@ function WebGLUnavailable() {
   );
 }
 
+function toServedUrdfPath(path) {
+  const raw = String(path || '').trim();
+  if (!raw) return null;
+  if (raw.startsWith('/urdf/')) return raw;
+  const basename = raw.split('/').pop();
+  return basename ? `/urdf/urdf/${basename}` : null;
+}
+
 function CameraPresetButtons({ onPreset, activePreset }) {
   return (
     <div className="absolute top-2 left-2 z-10 flex gap-1">
@@ -482,16 +490,33 @@ export default function RobotViewer3D({
   showSourceSelector = false,
   liveUpdateHz = 15,
   defaultVisualizationSource = 'state',
+  urdfPathOverride = '',
+  endEffectorLinksOverride = [],
 }) {
   const globalRobotType = useSelector((state) => state.tasks.robotType);
   const robotType = robotTypeOverride || globalRobotType;
   const { getRobotInfo } = useRosServiceCaller();
   const [robotInfo, setRobotInfo] = useState(EMPTY_ROBOT_INFO);
   const [webglAvailable] = useState(() => canCreateWebGLContext());
+  const replayRobotInfo = useMemo(() => {
+    const urdfPath = toServedUrdfPath(urdfPathOverride);
+    if (!urdfPath) return null;
+    return {
+      ...EMPTY_ROBOT_INFO,
+      urdfPath,
+      endEffectorLinks: Array.isArray(endEffectorLinksOverride)
+        ? endEffectorLinksOverride
+        : [],
+    };
+  }, [urdfPathOverride, endEffectorLinksOverride]);
 
   useEffect(() => {
-    if (!webglAvailable || !robotType) {
+    if (!webglAvailable || (!robotType && !replayRobotInfo)) {
       setRobotInfo(EMPTY_ROBOT_INFO);
+      return;
+    }
+    if (replayRobotInfo) {
+      setRobotInfo(replayRobotInfo);
       return;
     }
     setRobotInfo(EMPTY_ROBOT_INFO);
@@ -504,9 +529,8 @@ export default function RobotViewer3D({
         // Orchestrator returns an absolute filesystem path under
         // shared/robot_configs/urdf/. nginx serves the same directory at
         // /urdf/urdf/ so map basename onto that prefix.
-        const basename = info.urdf_path?.split('/').pop();
         setRobotInfo({
-          urdfPath: basename ? `/urdf/urdf/${basename}` : null,
+          urdfPath: toServedUrdfPath(info.urdf_path),
           stateJointTopics: info.state_joint_topics || [],
           actionTopics: info.action_topics || [],
           actionTopicTypes: info.action_topic_types || [],
@@ -519,7 +543,7 @@ export default function RobotViewer3D({
     return () => {
       cancelled = true;
     };
-  }, [robotType, getRobotInfo, webglAvailable]);
+  }, [robotType, replayRobotInfo, getRobotInfo, webglAvailable]);
 
   const { robot, loading, error, setJointValues, computeTrajectoryPaths, reload } = useUrdfRobot(
     webglAvailable ? robotInfo.urdfPath : null,

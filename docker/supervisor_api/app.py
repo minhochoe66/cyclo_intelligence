@@ -78,6 +78,7 @@ _USER_SERVICES: tuple[str, ...] = (
 )
 
 _BT_ROBOT_TYPE_FILE = "/run/cyclo_intelligence/bt_node_robot_type"
+_BT_SUPPORTED_ROBOT_TYPE = "ffw_sg2_rev1"
 _ROBOT_TYPE_RE = re.compile(r"^[A-Za-z0-9_.-]+$")
 
 
@@ -126,6 +127,18 @@ def _validate_robot_type(robot_type: str) -> str:
         raise HTTPException(400, "robot_type is required")
     if not _ROBOT_TYPE_RE.fullmatch(normalized):
         raise HTTPException(400, "robot_type contains unsupported characters")
+    return normalized
+
+
+def _validate_bt_robot_type(robot_type: str = "") -> str:
+    normalized = robot_type.strip() or _BT_SUPPORTED_ROBOT_TYPE
+    normalized = _validate_robot_type(normalized)
+    if normalized != _BT_SUPPORTED_ROBOT_TYPE:
+        raise HTTPException(
+            400,
+            "bt_node currently supports only "
+            f"{_BT_SUPPORTED_ROBOT_TYPE}",
+        )
     return normalized
 
 
@@ -1083,7 +1096,9 @@ async def service_start(
 ) -> ActionResult:
     _require_known_service(name)
     if name == "bt_node":
-        robot_type = _validate_robot_type(request.robot_type if request else "")
+        robot_type = _validate_bt_robot_type(
+            request.robot_type if request else ""
+        )
         _write_bt_robot_type(robot_type)
     # s6-rc -u change <name> brings the service up (idempotent).
     result = await _run("s6-rc", "-u", "change", name)

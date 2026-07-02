@@ -1,3 +1,4 @@
+import asyncio
 import importlib.util
 import os
 import subprocess
@@ -52,6 +53,7 @@ _backend_container_stale_reason = app._backend_container_stale_reason
 _compose_env = app._compose_env
 _host_workspace_dir = app._host_workspace_dir
 _require_known_service = app._require_known_service
+_validate_bt_robot_type = app._validate_bt_robot_type
 _validate_robot_type = app._validate_robot_type
 _write_bt_robot_type = app._write_bt_robot_type
 _resolve_groot_trt_paths = app._resolve_groot_trt_paths
@@ -536,9 +538,65 @@ def test_bt_node_robot_type_file_is_written(monkeypatch, tmp_path):
     target = tmp_path / "bt_node_robot_type"
     monkeypatch.setattr(app, "_BT_ROBOT_TYPE_FILE", str(target))
 
-    _write_bt_robot_type("omy_f3m")
+    _write_bt_robot_type("ffw_sg2_rev1")
 
-    assert target.read_text() == "omy_f3m\n"
+    assert target.read_text() == "ffw_sg2_rev1\n"
+
+
+def test_bt_node_robot_type_defaults_to_sg2():
+    assert _validate_bt_robot_type("") == "ffw_sg2_rev1"
+
+
+def test_bt_node_robot_type_rejects_other_robots():
+    try:
+        _validate_bt_robot_type("omy_f3m")
+    except app.HTTPException as exc:
+        assert exc.status_code == 400
+    else:
+        raise AssertionError("bt_node should reject unsupported robot types")
+
+
+def test_bt_node_start_defaults_to_sg2(monkeypatch, tmp_path):
+    target = tmp_path / "bt_node_robot_type"
+    calls = []
+
+    async def fake_run(*args, **kwargs):
+        calls.append(args)
+        return SimpleNamespace(rc=0, stdout="started", stderr="")
+
+    monkeypatch.setattr(app, "_BT_ROBOT_TYPE_FILE", str(target))
+    monkeypatch.setattr(app, "_run", fake_run)
+
+    result = asyncio.run(app.service_start("bt_node"))
+
+    assert result.ok is True
+    assert target.read_text() == "ffw_sg2_rev1\n"
+    assert calls == [("s6-rc", "-u", "change", "bt_node")]
+
+
+def test_bt_node_start_rejects_other_robots(monkeypatch, tmp_path):
+    target = tmp_path / "bt_node_robot_type"
+    calls = []
+
+    async def fake_run(*args, **kwargs):
+        calls.append(args)
+        return SimpleNamespace(rc=0, stdout="started", stderr="")
+
+    monkeypatch.setattr(app, "_BT_ROBOT_TYPE_FILE", str(target))
+    monkeypatch.setattr(app, "_run", fake_run)
+
+    try:
+        asyncio.run(app.service_start(
+            "bt_node",
+            app.ServiceActionRequest(robot_type="omy_f3m"),
+        ))
+    except app.HTTPException as exc:
+        assert exc.status_code == 400
+    else:
+        raise AssertionError("bt_node should reject unsupported robot types")
+
+    assert not target.exists()
+    assert calls == []
 
 
 def test_robot_type_validation_rejects_shell_metacharacters():
