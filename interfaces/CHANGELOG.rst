@@ -2,6 +2,11 @@
 Changelog for package interfaces
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
+1.1.0 (2026-07-01)
+------------------
+* Updated Cyclo release metadata to 1.1.0.
+* Contributors: Taehyeong Kim
+
 1.0.0 (2026-06-29)
 ------------------
 * Updated Cyclo release metadata to 1.0.0.

@@ -31,23 +31,45 @@ const DEFAULT_LAYOUT = [
   { aspect: '3/4', rotate: true },
 ];
 
-// Robot-type specific camera topic assignments: [left, center, right].
-// Must match each robot's yaml at shared/robot_configs/<robot>_config.yaml
-// (observation.images entries) so a fresh user with no saved selection
-// sees live frames immediately. ffw_sg2_rev1 = ZED stereo head +
-// RealSense wrists; ffw_bg2_rev4 still uses the legacy
-// /robot/camera/<cam>/... topic shape until its yaml migrates.
-const ROBOT_CAMERA_PRESETS = {
-  ffw_sg2_rev1: [
-    '/camera_left/camera_left/color/image_rect_raw/compressed',
-    '/zed/zed_node/left/image_rect_color/compressed',
-    '/camera_right/camera_right/color/image_rect_raw/compressed',
-  ],
-  ffw_bg2_rev4: [
-    '/robot/camera/cam_left_wrist/image_raw/compressed',
-    '/robot/camera/cam_left_head/image_raw/compressed',
-    '/robot/camera/cam_right_wrist/image_raw/compressed',
-  ],
+const emptyAssignment = () => Array(DEFAULT_LAYOUT.length).fill(null);
+
+const normalizeAssignment = (topics) => {
+  const normalized = emptyAssignment();
+  if (!Array.isArray(topics)) return normalized;
+  for (let i = 0; i < Math.min(topics.length, normalized.length); i += 1) {
+    normalized[i] = topics[i] || null;
+  }
+  return normalized;
+};
+
+const hasAssignedTopic = (topics) => (
+  Array.isArray(topics) && topics.some((topic) => Boolean(topic))
+);
+
+const assignTopicsToLayout = (imageTopics) => {
+  const assigned = emptyAssignment();
+  const assignmentOrder = [1, 0, 2];
+  const topics = (Array.isArray(imageTopics) ? imageTopics : []).filter(Boolean);
+  for (let i = 0; i < Math.min(topics.length, assignmentOrder.length); i += 1) {
+    assigned[assignmentOrder[i]] = topics[i];
+  }
+  return assigned;
+};
+
+const savedTopicsMatchAvailableTopics = (savedTopics, imageTopics) => {
+  const available = new Set((Array.isArray(imageTopics) ? imageTopics : []).filter(Boolean));
+  return normalizeAssignment(savedTopics)
+    .filter(Boolean)
+    .every((topic) => available.has(topic));
+};
+
+const getSavedAssignmentForRobot = (state, robotType) => {
+  const normalizedRobotType = String(robotType || '').trim();
+  if (!normalizedRobotType) return null;
+  const savedRobotType = String(state.ros.assignedImageTopicsRobotType || '').trim();
+  if (savedRobotType !== normalizedRobotType) return null;
+  const saved = normalizeAssignment(state.ros.assignedImageTopics);
+  return hasAssignedTopic(saved) ? saved : null;
 };
 
 export default function ImageGrid({ isActive = true }) {
@@ -61,25 +83,18 @@ export default function ImageGrid({ isActive = true }) {
   const [isLoadingTopics, setIsLoadingTopics] = useState(false);
   const [topicListError, setTopicListError] = useState(null);
   // Mount-time initial value: prefer whatever this component last persisted
-  // (so Record↔Inference page transitions remember the user's selection),
-  // otherwise fall back to the robot preset. We deliberately read via
-  // store.getState() instead of useSelector so the component does NOT
-  // subscribe to this slice — the only writer is this component itself, and
-  // round-tripping our own dispatch back into local state used to ping-pong
-  // with the persist effect below (React error #185, blank screen on page
-  // transition).
+  // for the same robot type (so Record↔Inference page transitions remember
+  // the user's selection), otherwise start empty until /image/get_available_list
+  // returns the selected robot's YAML-backed observation.images. We
+  // deliberately read via store.getState() instead of useSelector so the
+  // component does NOT subscribe to this slice — the only writer is this
+  // component itself, and round-tripping our own dispatch back into local
+  // state used to ping-pong with the persist effect below (React error #185,
+  // blank screen on page transition).
   const [asignedImageTopicList, setAsignedImageTopicList] = useState(() => {
-    const saved = store.getState().ros.assignedImageTopics;
-    if (
-      Array.isArray(saved) &&
-      saved.length === DEFAULT_LAYOUT.length &&
-      saved.some(Boolean)
-    ) {
-      return [...saved];
-    }
-    return [...(ROBOT_CAMERA_PRESETS.ffw_sg2_rev1 || Array(DEFAULT_LAYOUT.length).fill(null))];
+    const saved = getSavedAssignmentForRobot(store.getState(), robotType);
+    return saved || emptyAssignment();
   });
-  const [presetApplied, setPresetApplied] = useState(false);
   // Per-cell rotation override: 0 = landscape, -90 = portrait; undefined = use layout default
   const [rotationOverrides, setRotationOverrides] = useState({});
 
@@ -99,47 +114,26 @@ export default function ImageGrid({ isActive = true }) {
     }));
   }, [rotationDegrees]);
 
-  // Use robot type preset, or fallback to ffw_sg2_rev1 when robotType not yet received (e.g. right after page load)
-  const preset = useMemo(
-    () => ROBOT_CAMERA_PRESETS[robotType] || ROBOT_CAMERA_PRESETS.ffw_sg2_rev1,
-    [robotType]
-  );
-
-  // Apply preset when we haven't applied yet and the local list has no valid
-  // entries (don't overwrite a list we restored from redux at mount).
-  useEffect(() => {
-    if (!preset || presetApplied) return;
-    const hasLocal = asignedImageTopicList.length === layout.length && asignedImageTopicList.some(Boolean);
-    if (hasLocal) {
-      setPresetApplied(true);
+  const applyImageTopicsFromConfig = useCallback((imageTopics, { force = false } = {}) => {
+    const nextAssignment = assignTopicsToLayout(imageTopics);
+    if (!hasAssignedTopic(nextAssignment)) return;
+    const saved = getSavedAssignmentForRobot(store.getState(), robotType);
+    if (
+      !force &&
+      saved &&
+      savedTopicsMatchAvailableTopics(saved, imageTopics)
+    ) {
       return;
     }
-    setAsignedImageTopicList([...preset]);
-    setPresetApplied(true);
-    console.log(`Applied camera preset for ${robotType || 'default (ffw_sg2_rev1)'}:`, preset);
-  }, [preset, robotType, presetApplied, asignedImageTopicList, layout.length]);
+    console.log(`Applied camera topics for ${robotType || 'current robot'}:`, nextAssignment);
+    setAsignedImageTopicList(nextAssignment);
+  }, [robotType, store]);
 
-  // Reset presetApplied when robotType changes
   useEffect(() => {
-    setPresetApplied(false);
-  }, [robotType]);
-
-  const autoAssignTopics = useCallback((imageTopics, isRefresh = false) => {
-    if (imageTopics.length > 0) {
-      const autoTopics = Array(layout.length).fill(null);
-      const assignmentOrder = [1, 0, 2];
-
-      for (let i = 0; i < Math.min(imageTopics.length, assignmentOrder.length); i++) {
-        autoTopics[assignmentOrder[i]] = imageTopics[i];
-      }
-
-      console.log(`${isRefresh ? 'Re-assigned' : 'Auto-assigned'} topics:`, autoTopics);
-      setAsignedImageTopicList(autoTopics);
-      toast.success(
-        `${isRefresh ? 'Re-a' : 'Auto-a'}ssigned ${Math.min(imageTopics.length, 3)} topics to grid`
-      );
-    }
-  }, [layout.length]);
+    const saved = getSavedAssignmentForRobot(store.getState(), robotType);
+    setAsignedImageTopicList(saved || emptyAssignment());
+    setRotationOverrides({});
+  }, [robotType, store]);
 
   // Sync list length when layout length changes (extend or trim)
   useEffect(() => {
@@ -157,14 +151,19 @@ export default function ImageGrid({ isActive = true }) {
   useEffect(() => {
     if (asignedImageTopicList.length === 0) return;
     const current = store.getState().ros.assignedImageTopics;
+    const currentRobotType = store.getState().ros.assignedImageTopicsRobotType || '';
+    const normalizedRobotType = String(robotType || '').trim();
     const same =
       Array.isArray(current) &&
       current.length === asignedImageTopicList.length &&
       asignedImageTopicList.every((t, i) => t === current[i]);
-    if (!same) {
-      dispatch(setAssignedImageTopics(asignedImageTopicList));
+    if (!same || currentRobotType !== normalizedRobotType) {
+      dispatch(setAssignedImageTopics({
+        robotType: normalizedRobotType,
+        topics: asignedImageTopicList,
+      }));
     }
-  }, [asignedImageTopicList, dispatch, store]);
+  }, [asignedImageTopicList, dispatch, robotType, store]);
 
   useEffect(() => {
     const fetchTopicList = async () => {
@@ -175,9 +174,9 @@ export default function ImageGrid({ isActive = true }) {
         if (result && result.success) {
           const imageTopics = result.image_topic_list || [];
           dispatch(setImageTopicList(imageTopics));
+          applyImageTopicsFromConfig(imageTopics);
           setTopicListError(null);
           toast.success(`Loaded ${imageTopics.length} image topics`);
-          // Preset is always used (with fallback), so no need to auto-assign from list here
         } else {
           const errorMsg = result?.message || 'Unknown error occurred';
           setTopicListError(`Service error: ${errorMsg}`);
@@ -194,7 +193,7 @@ export default function ImageGrid({ isActive = true }) {
     };
 
     fetchTopicList();
-  }, [getImageTopicList, autoAssignTopics, dispatch, preset]);
+  }, [getImageTopicList, applyImageTopicsFromConfig, dispatch]);
 
   const handlePlusClick = (idx) => {
     setSelectedIdx(idx);
@@ -209,6 +208,7 @@ export default function ImageGrid({ isActive = true }) {
       if (result && result.success) {
         const imageTopics = result.image_topic_list || [];
         dispatch(setImageTopicList(imageTopics));
+        applyImageTopicsFromConfig(imageTopics, { force: true });
         setTopicListError(null);
         toast.success(`Refreshed: ${imageTopics.length} image topics`);
       } else {

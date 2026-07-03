@@ -2,6 +2,13 @@
 Changelog for package shared
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
+1.1.0 (2026-07-01)
+------------------
+* Added F2 robot configuration, URDF, and mesh assets for RealSense-head robot workflows.
+* Added current robot type configuration assets, including OMY, OMX, and SH5 layouts.
+* Updated Cyclo release metadata to 1.1.0.
+* Contributors: Taehyeong Kim
+
 1.0.0 (2026-06-29)
 ------------------
 * Updated Cyclo release metadata to 1.0.0.

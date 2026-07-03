@@ -2,6 +2,12 @@
 Changelog for package cyclo-ui
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
+1.1.0 (2026-07-01)
+------------------
+* Added UI support for the current robot type configurations and 3D viewer assets.
+* Updated Cyclo UI release metadata to 1.1.0.
+* Contributors: Taehyeong Kim
+
 1.0.0 (2026-06-29)
 ------------------
 * Updated Cyclo UI release metadata to 1.0.0.
