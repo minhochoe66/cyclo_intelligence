@@ -24,12 +24,12 @@ import ImageTopicSelectModal from './ImageTopicSelectModal';
 import { setImageTopicList, setAssignedImageTopics } from '../features/ros/rosSlice';
 
 // [left(idx 0), center(idx 1), right(idx 2)]
-// rotate: true = wrist camera (landscape stream displayed as portrait)
 const DEFAULT_LAYOUT = [
-  { aspect: '3/4', rotate: true },
-  { aspect: '16/9', rotate: false },
-  { aspect: '3/4', rotate: true },
+  { aspect: '3/4' },
+  { aspect: '16/9' },
+  { aspect: '3/4' },
 ];
+const MANUAL_ROTATION_DEG = 270;
 
 const emptyAssignment = () => Array(DEFAULT_LAYOUT.length).fill(null);
 
@@ -55,6 +55,27 @@ const assignTopicsToLayout = (imageTopics) => {
   }
   return assigned;
 };
+
+export const normalizeRotationDeg = (value) => {
+  const numeric = Number(value);
+  if (!Number.isFinite(numeric)) return 0;
+  return ((Math.round(numeric) % 360) + 360) % 360;
+};
+
+export const buildTopicRotationMap = (imageTopics, rotationDegList) => {
+  const topics = Array.isArray(imageTopics) ? imageTopics : [];
+  const rotations = Array.isArray(rotationDegList) ? rotationDegList : [];
+  return topics.reduce((acc, topic, idx) => {
+    if (topic) {
+      acc[topic] = normalizeRotationDeg(rotations[idx] ?? 0);
+    }
+    return acc;
+  }, {});
+};
+
+const getRotationForTopic = (topic, topicRotationMap) => (
+  normalizeRotationDeg(topicRotationMap?.[topic] ?? 0)
+);
 
 const savedTopicsMatchAvailableTopics = (savedTopics, imageTopics) => {
   const available = new Set((Array.isArray(imageTopics) ? imageTopics : []).filter(Boolean));
@@ -95,7 +116,8 @@ export default function ImageGrid({ isActive = true }) {
     const saved = getSavedAssignmentForRobot(store.getState(), robotType);
     return saved || emptyAssignment();
   });
-  // Per-cell rotation override: 0 = landscape, -90 = portrait; undefined = use layout default
+  const [topicRotationMap, setTopicRotationMap] = useState({});
+  // Per-cell manual override. undefined = use robot_config rotation for the assigned topic.
   const [rotationOverrides, setRotationOverrides] = useState({});
 
   const { getImageTopicList } = useRosServiceCaller();
@@ -103,16 +125,20 @@ export default function ImageGrid({ isActive = true }) {
   const layout = DEFAULT_LAYOUT;
 
   const rotationDegrees = useMemo(
-    () => layout.map((cell, idx) => rotationOverrides[idx] ?? (cell.rotate ? -90 : 0)),
-    [layout, rotationOverrides]
+    () => Array.from({ length: layout.length }, (_, idx) => (
+      rotationOverrides[idx] ?? getRotationForTopic(asignedImageTopicList[idx], topicRotationMap)
+    )),
+    [asignedImageTopicList, layout, rotationOverrides, topicRotationMap]
   );
 
   const handleRotateClick = useCallback((idx) => {
     setRotationOverrides((prev) => ({
       ...prev,
-      [idx]: rotationDegrees[idx] === -90 ? 0 : -90,
+      [idx]: normalizeRotationDeg(rotationDegrees[idx]) === 0
+        ? (getRotationForTopic(asignedImageTopicList[idx], topicRotationMap) || MANUAL_ROTATION_DEG)
+        : 0,
     }));
-  }, [rotationDegrees]);
+  }, [asignedImageTopicList, rotationDegrees, topicRotationMap]);
 
   const applyImageTopicsFromConfig = useCallback((imageTopics, { force = false } = {}) => {
     const nextAssignment = assignTopicsToLayout(imageTopics);
@@ -127,11 +153,13 @@ export default function ImageGrid({ isActive = true }) {
     }
     console.log(`Applied camera topics for ${robotType || 'current robot'}:`, nextAssignment);
     setAsignedImageTopicList(nextAssignment);
+    setRotationOverrides({});
   }, [robotType, store]);
 
   useEffect(() => {
     const saved = getSavedAssignmentForRobot(store.getState(), robotType);
     setAsignedImageTopicList(saved || emptyAssignment());
+    setTopicRotationMap({});
     setRotationOverrides({});
   }, [robotType, store]);
 
@@ -173,6 +201,10 @@ export default function ImageGrid({ isActive = true }) {
         const result = await getImageTopicList();
         if (result && result.success) {
           const imageTopics = result.image_topic_list || [];
+          setTopicRotationMap(buildTopicRotationMap(
+            imageTopics,
+            result.rotation_deg_list || []
+          ));
           dispatch(setImageTopicList(imageTopics));
           applyImageTopicsFromConfig(imageTopics);
           setTopicListError(null);
@@ -180,11 +212,13 @@ export default function ImageGrid({ isActive = true }) {
         } else {
           const errorMsg = result?.message || 'Unknown error occurred';
           setTopicListError(`Service error: ${errorMsg}`);
+          setTopicRotationMap({});
           dispatch(setImageTopicList([]));
           toast.error(`Failed to load image topics: ${errorMsg}`);
         }
       } catch (error) {
         setTopicListError('Failed to load image topic list');
+        setTopicRotationMap({});
         dispatch(setImageTopicList([]));
         toast.error('Failed to load image topic list');
       } finally {
@@ -207,6 +241,10 @@ export default function ImageGrid({ isActive = true }) {
       const result = await getImageTopicList();
       if (result && result.success) {
         const imageTopics = result.image_topic_list || [];
+        setTopicRotationMap(buildTopicRotationMap(
+          imageTopics,
+          result.rotation_deg_list || []
+        ));
         dispatch(setImageTopicList(imageTopics));
         applyImageTopicsFromConfig(imageTopics, { force: true });
         setTopicListError(null);
@@ -214,11 +252,13 @@ export default function ImageGrid({ isActive = true }) {
       } else {
         const errorMsg = result?.message || 'Unknown error occurred';
         setTopicListError(`Service error: ${errorMsg}`);
+        setTopicRotationMap({});
         dispatch(setImageTopicList([]));
         toast.error(`Failed to refresh topics: ${errorMsg}`);
       }
     } catch (error) {
       setTopicListError('Failed to load image topic list');
+      setTopicRotationMap({});
       dispatch(setImageTopicList([]));
       toast.error('Failed to refresh image topics');
     } finally {
@@ -228,12 +268,22 @@ export default function ImageGrid({ isActive = true }) {
 
   const handleTopicSelect = (topic) => {
     setAsignedImageTopicList(asignedImageTopicList.map((t, i) => (i === selectedIdx ? topic : t)));
+    setRotationOverrides((prev) => {
+      const next = { ...prev };
+      delete next[selectedIdx];
+      return next;
+    });
     setModalOpen(false);
     setSelectedIdx(null);
   };
 
   const handleCellClose = (idx) => {
     setAsignedImageTopicList(asignedImageTopicList.map((t, i) => (i === idx ? null : t)));
+    setRotationOverrides((prev) => {
+      const next = { ...prev };
+      delete next[idx];
+      return next;
+    });
   };
 
   const classImageGridArea = clsx(

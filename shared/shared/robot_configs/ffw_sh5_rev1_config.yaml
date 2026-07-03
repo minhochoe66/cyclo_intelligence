@@ -7,11 +7,12 @@ orchestrator:
       # part of the default SH5 recording layout.
       observation:
         images:
+          # Initial live camera grid placement follows YAML insertion order.
+          # UI cell indexes: 0=left, 1=center, 2=right.
+          # The first three image entries map to UI cells [1, 0, 2].
+          # rotation_deg, when set, must be one of: 0, 90, 180, 270.
           cam_left_head:
             topic: /zed/zed_node/left/image_rect_color/compressed
-            msg_type: sensor_msgs/msg/CompressedImage
-          cam_right_head:
-            topic: /zed/zed_node/right/image_rect_color/compressed
             msg_type: sensor_msgs/msg/CompressedImage
           cam_left_wrist:
             topic: /camera_left/camera_left/color/image_rect_raw/compressed
@@ -21,6 +22,9 @@ orchestrator:
             topic: /camera_right/camera_right/color/image_rect_raw/compressed
             msg_type: sensor_msgs/msg/CompressedImage
             rotation_deg: 270
+          cam_right_head:
+            topic: /zed/zed_node/right/image_rect_color/compressed
+            msg_type: sensor_msgs/msg/CompressedImage
 
         # Raw tactile observations are recorded to MCAP, but not flattened
         # into observation.state until the converter has a HandPressures parser.
