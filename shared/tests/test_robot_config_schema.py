@@ -9,6 +9,44 @@ sys.path.insert(0, str(REPO_ROOT / "shared"))
 from shared.robot_configs import schema as robot_schema  # noqa: E402
 
 
+def _assert_urdf_path_and_mesh_assets_resolve(robot_type, expected_urdf_name):
+    section = robot_schema.load_robot_section(robot_type)
+
+    urdf_path = Path(robot_schema.get_urdf_path(section))
+    assert urdf_path == (
+        REPO_ROOT
+        / "shared"
+        / "shared"
+        / "robot_configs"
+        / "urdf"
+        / expected_urdf_name
+    )
+    assert urdf_path.exists()
+
+    tree = ET.parse(urdf_path)
+    mesh_filenames = {
+        mesh.attrib["filename"]
+        for mesh in tree.findall(".//mesh")
+        if mesh.attrib.get("filename", "").startswith("package://ffw_description/")
+    }
+    assert mesh_filenames
+
+    asset_root = (
+        REPO_ROOT
+        / "shared"
+        / "shared"
+        / "robot_configs"
+        / "ffw_description"
+    )
+    missing = []
+    for filename in sorted(mesh_filenames):
+        rel_path = filename.removeprefix("package://ffw_description/").replace("//", "/")
+        if not (asset_root / rel_path).exists():
+            missing.append(rel_path)
+
+    assert missing == []
+
+
 def test_sh5_config_records_raw_tactile_topics():
     section = robot_schema.load_robot_section("ffw_sh5_rev1")
 
@@ -50,41 +88,62 @@ def test_sh5_state_and_action_dimensions_match_layout():
 
 
 def test_sh5_urdf_path_and_mesh_assets_resolve():
-    section = robot_schema.load_robot_section("ffw_sh5_rev1")
-
-    urdf_path = Path(robot_schema.get_urdf_path(section))
-    assert urdf_path == (
-        REPO_ROOT
-        / "shared"
-        / "shared"
-        / "robot_configs"
-        / "urdf"
-        / "ffw_sh5_follower.urdf"
+    _assert_urdf_path_and_mesh_assets_resolve(
+        "ffw_sh5_rev1",
+        "ffw_sh5_follower.urdf",
     )
-    assert urdf_path.exists()
 
-    tree = ET.parse(urdf_path)
-    mesh_filenames = {
-        mesh.attrib["filename"]
-        for mesh in tree.findall(".//mesh")
-        if mesh.attrib.get("filename", "").startswith("package://ffw_description/")
+
+def test_f2_config_uses_realsense_head_camera_layout():
+    section = robot_schema.load_robot_section("f2")
+
+    assert robot_schema.get_image_topics(section) == {
+        "cam_head": {
+            "topic": "/camera_head/camera_head/color/image_raw/compressed",
+            "msg_type": "sensor_msgs/msg/CompressedImage",
+        },
+        "cam_left_wrist": {
+            "topic": "/camera_left/camera_left/color/image_rect_raw/compressed",
+            "msg_type": "sensor_msgs/msg/CompressedImage",
+            "rotation_deg": 270,
+        },
+        "cam_right_wrist": {
+            "topic": "/camera_right/camera_right/color/image_rect_raw/compressed",
+            "msg_type": "sensor_msgs/msg/CompressedImage",
+            "rotation_deg": 270,
+        },
     }
-    assert mesh_filenames
 
-    asset_root = (
-        REPO_ROOT
-        / "shared"
-        / "shared"
-        / "robot_configs"
-        / "ffw_description"
+    camera_info_topics = robot_schema.get_camera_info_topics(section)
+    assert camera_info_topics["cam_head"] == "/camera_head/camera_head/color/camera_info"
+
+    extra_topics = robot_schema.get_recording_extra_topics(section)
+    assert "/camera_head/camera_head/color/camera_info" in extra_topics
+    assert "/zed/zed_node/left/camera_info" not in extra_topics
+    assert "/zed/zed_node/right/camera_info" not in extra_topics
+
+
+def test_f2_state_and_action_dimensions_match_layout():
+    section = robot_schema.load_robot_section("f2")
+
+    state_dim = sum(
+        len(cfg["joint_names"])
+        for cfg in robot_schema.get_state_groups(section).values()
     )
-    missing = []
-    for filename in sorted(mesh_filenames):
-        rel_path = filename.removeprefix("package://ffw_description/").replace("//", "/")
-        if not (asset_root / rel_path).exists():
-            missing.append(rel_path)
+    action_dim = sum(
+        len(cfg["joint_names"])
+        for cfg in robot_schema.get_action_groups(section).values()
+    )
 
-    assert missing == []
+    assert state_dim == 22
+    assert action_dim == 22
+
+
+def test_f2_urdf_path_and_mesh_assets_resolve():
+    _assert_urdf_path_and_mesh_assets_resolve(
+        "f2",
+        "ffw_f2_follower.urdf",
+    )
 
 
 def test_tactile_is_optional_for_existing_sg2_config():
