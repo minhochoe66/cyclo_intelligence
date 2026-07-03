@@ -7,6 +7,9 @@ orchestrator:
       # part of the default SH5 recording layout.
       observation:
         images:
+          # Initial live camera grid placement follows YAML insertion order.
+          # UI cell indexes: 0=left, 1=center, 2=right.
+          # The first three image entries map to UI cells [1, 0, 2].
           cam_left_head:
             topic: /zed/zed_node/left/image_rect_color/compressed
             msg_type: sensor_msgs/msg/CompressedImage

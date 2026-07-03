@@ -11,6 +11,9 @@ orchestrator:
       # ────────────────────────────────────────────────────────────────
       observation:
         images:
+          # Initial live camera grid placement follows YAML insertion order.
+          # UI cell indexes: 0=left, 1=center, 2=right.
+          # The first three image entries map to UI cells [1, 0, 2].
           camera1:
             topic: /camera1/image_raw/compressed
             msg_type: sensor_msgs/msg/CompressedImage
