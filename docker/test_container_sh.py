@@ -12,7 +12,6 @@ def _copy_container_script(tmp_path):
     docker_dir.mkdir()
     shutil.copy2(REPO_ROOT / "docker" / "container.sh", docker_dir / "container.sh")
     (docker_dir / "container.sh").chmod(0o755)
-    (docker_dir / "config").mkdir()
     return docker_dir
 
 
@@ -65,15 +64,8 @@ def _stub_env(tmp_path, log_path):
     }
 
 
-def test_start_creates_ros_zenoh_env_from_default(tmp_path):
+def test_start_does_not_create_legacy_runtime_env_file_from_default(tmp_path):
     docker_dir = _copy_container_script(tmp_path)
-    default_env = docker_dir / "config" / "ros_zenoh.default.env"
-    default_env.write_text(
-        "export ROS_DOMAIN_ID=30\n"
-        "export RMW_IMPLEMENTATION=rmw_zenoh_cpp\n"
-        "export ZENOH_ROUTER_IP=10.20.30.40\n"
-        "export ZENOH_ROUTER_PORT=7447\n"
-    )
     log_path = _write_start_stub(tmp_path)
 
     result = subprocess.run(
@@ -85,38 +77,33 @@ def test_start_creates_ros_zenoh_env_from_default(tmp_path):
         capture_output=True,
     )
 
-    runtime_env = docker_dir / "workspace" / "config" / "ros_zenoh.env"
-    assert runtime_env.read_text() == default_env.read_text()
-    assert "Created ROS/Zenoh runtime env from default" in result.stdout
-
-
-def test_start_preserves_existing_ros_zenoh_env(tmp_path):
-    docker_dir = _copy_container_script(tmp_path)
-    (docker_dir / "config" / "ros_zenoh.default.env").write_text(
-        "export ZENOH_ROUTER_IP=127.0.0.1\n"
-    )
-    runtime_env = docker_dir / "workspace" / "config" / "ros_zenoh.env"
-    runtime_env.parent.mkdir(parents=True)
-    runtime_env.write_text("export ZENOH_ROUTER_IP=192.168.60.139\n")
-    log_path = _write_start_stub(tmp_path)
-
-    result = subprocess.run(
-        [str(docker_dir / "container.sh"), "start"],
-        cwd=tmp_path,
-        env=_stub_env(tmp_path, log_path),
-        check=True,
-        text=True,
-        capture_output=True,
-    )
-
-    assert runtime_env.read_text() == "export ZENOH_ROUTER_IP=192.168.60.139\n"
+    legacy_runtime_env = docker_dir / "workspace" / "config" / "ros_zenoh.env"
+    assert not legacy_runtime_env.exists()
     assert "Created ROS/Zenoh runtime env from default" not in result.stdout
 
 
-def test_enter_lerobot_creates_ros_zenoh_env_from_default(tmp_path):
+def test_start_preserves_existing_legacy_runtime_env_file_without_touching(tmp_path):
     docker_dir = _copy_container_script(tmp_path)
-    default_env = docker_dir / "config" / "ros_zenoh.default.env"
-    default_env.write_text("export ZENOH_ROUTER_IP=127.0.0.1\n")
+    legacy_runtime_env = docker_dir / "workspace" / "config" / "ros_zenoh.env"
+    legacy_runtime_env.parent.mkdir(parents=True)
+    legacy_runtime_env.write_text("export ZENOH_ROUTER_IP=192.168.60.139\n")
+    log_path = _write_start_stub(tmp_path)
+
+    result = subprocess.run(
+        [str(docker_dir / "container.sh"), "start"],
+        cwd=tmp_path,
+        env=_stub_env(tmp_path, log_path),
+        check=True,
+        text=True,
+        capture_output=True,
+    )
+
+    assert legacy_runtime_env.read_text() == "export ZENOH_ROUTER_IP=192.168.60.139\n"
+    assert "Created ROS/Zenoh runtime env from default" not in result.stdout
+
+
+def test_enter_lerobot_uses_plain_bash(tmp_path):
+    docker_dir = _copy_container_script(tmp_path)
     log_path = _write_enter_stub(tmp_path, "lerobot_server")
 
     subprocess.run(
@@ -128,12 +115,11 @@ def test_enter_lerobot_creates_ros_zenoh_env_from_default(tmp_path):
         capture_output=True,
     )
 
-    runtime_env = docker_dir / "workspace" / "config" / "ros_zenoh.env"
-    assert runtime_env.read_text() == default_env.read_text()
-    assert any(
-        "exec -it lerobot_server bash -lc" in call
-        for call in log_path.read_text().splitlines()
-    )
+    legacy_runtime_env = docker_dir / "workspace" / "config" / "ros_zenoh.env"
+    docker_calls = log_path.read_text().splitlines()
+    assert not legacy_runtime_env.exists()
+    assert "exec -it lerobot_server bash" in docker_calls
+    assert not any("bash -lc" in call for call in docker_calls)
 
 
 def test_start_pulls_main_image_only(tmp_path):
@@ -180,6 +166,24 @@ def test_start_pulls_main_image_only(tmp_path):
     )
     assert not any("pull --ignore-pull-failures lerobot" in call for call in docker_calls)
     assert not any("pull --ignore-pull-failures groot" in call for call in docker_calls)
+
+
+def test_start_groot_build_skips_prebuilt_pull(tmp_path):
+    docker_dir = _copy_container_script(tmp_path)
+    log_path = _write_start_stub(tmp_path)
+
+    subprocess.run(
+        [str(docker_dir / "container.sh"), "start-groot", "--build"],
+        cwd=tmp_path,
+        env=_stub_env(tmp_path, log_path),
+        check=True,
+        text=True,
+        capture_output=True,
+    )
+
+    docker_calls = log_path.read_text().splitlines()
+    assert not any("pull --ignore-pull-failures groot" in call for call in docker_calls)
+    assert any("up -d --build groot" in call for call in docker_calls)
 
 
 def test_start_does_not_remove_policy_container_with_stale_workspace_mount(tmp_path):

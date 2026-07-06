@@ -66,18 +66,28 @@ Dockerfile (only needed when iterating on Dockerfile changes).
 
 ### ROS/Zenoh runtime env
 
-Runtime ROS/Zenoh settings are shared through:
+Runtime ROS/Zenoh settings are configured in each container's root shell setup:
 
 ```bash
-docker/workspace/config/ros_zenoh.env
+/root/.bashrc
 ```
 
-`container.sh start*` creates this file from the shared default
-[`docker/config/ros_zenoh.default.env`](docker/config/ros_zenoh.default.env) if
-it is missing. Edit the workspace runtime file when `ROS_DOMAIN_ID` or the
-Zenoh router IP changes. s6-managed services and interactive shells source the
-same file so manual ROS commands and policy servers use one configuration
-source.
+Enter the target container, edit the Cyclo ROS/Zenoh block near the top of
+`/root/.bashrc`, then restart that container when `ROS_DOMAIN_ID` or the Zenoh
+router changes. For a remote router, comment the local `ZENOH_CONFIG_OVERRIDE`
+line and uncomment the remote example with the router's IP. s6-managed services
+source the same file at startup, so manual ROS commands and policy servers use
+one configuration source.
+
+```bash
+export ROS_DOMAIN_ID=30
+export RMW_IMPLEMENTATION=rmw_zenoh_cpp
+export ZENOH_CONFIG_OVERRIDE='transport/shared_memory/enabled=true'
+# export ZENOH_CONFIG_OVERRIDE='transport/shared_memory/enabled=true;mode="client";connect/endpoints=["tcp/192.168.60.139:7447"]'
+```
+
+`docker restart` preserves the edits; recreating or updating the container
+resets `/root/.bashrc` to the image default.
 
 ## Architecture
 

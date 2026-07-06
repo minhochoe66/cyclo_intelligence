@@ -43,7 +43,7 @@ services:
   # ============================================================
   cyclo_intelligence:
     container_name: cyclo_intelligence
-    image: robotis/cyclo-intelligence:${VERSION:-1.1.1}-${ARCH:-arm64}
+    image: robotis/cyclo-intelligence:${VERSION:-1.1.2}-${ARCH:-arm64}
     build:
       context: ..
       dockerfile: docker/Dockerfile.${ARCH:-arm64}
@@ -70,16 +70,6 @@ services:
     environment:
       - DISPLAY=${DISPLAY}
       - QT_X11_NO_MITSHM=1
-      - ROS_DOMAIN_ID=${ROS_DOMAIN_ID:-30}
-      - RMW_IMPLEMENTATION=rmw_zenoh_cpp
-      # Runtime scripts source this file after container env. Edit the
-      # host copy at docker/workspace/config/ros_zenoh.env when the
-      # Zenoh router IP/domain changes.
-      - CYCLO_ROS_ENV_FILE=/workspace/config/ros_zenoh.env
-      # Cyclo does not start rmw_zenohd. This points at the external router.
-      - ZENOH_ROUTER_IP=127.0.0.1
-      - ZENOH_ROUTER_PORT=7447
-      - ZENOH_CONFIG_OVERRIDE=transport/shared_memory/enabled=true
       - CYCLO_UI_PORT=${CYCLO_UI_PORT:-80}
       # LOAD may include first-time gated backbone downloads (e.g. Cosmos).
       # Keep this long enough that a real download is not surfaced as a
@@ -181,22 +171,6 @@ services:
     # robot_type is *not* baked here. Main receives it on
     # InferenceCommand.LOAD, then configures its local RobotClient command path.
     environment:
-      - ROS_DOMAIN_ID=${ROS_DOMAIN_ID:-30}
-      # Runtime scripts source this file after container env. Edit the
-      # host copy at docker/workspace/config/ros_zenoh.env when the
-      # Zenoh router IP/domain changes.
-      - CYCLO_ROS_ENV_FILE=/workspace/config/ros_zenoh.env
-      - ZENOH_ROUTER_IP=127.0.0.1
-      - ZENOH_ROUTER_PORT=7447
-      - ZENOH_SDK_PATH=/zenoh_sdk
-      - ZENOH_CONFIG_OVERRIDE=transport/shared_memory/enabled=true
-      - ZENOH_TRANSPORT_SHM_ENABLED=true
-      - ZENOH_SHM_ENABLED=true
-      - ROBOT_CLIENT_SDK_PATH=/robot_client_sdk
-      - ACTION_CHUNK_PROCESSING_SDK_PATH=/action_chunk_processing_sdk
-      # Drives Zenoh service prefixes and the default engine module name.
-      - POLICY_BACKEND=lerobot
-      - POLICY_ENGINE_MODULE=lerobot_engine
       # Main-runtime waits on the local engine process while weights and
       # first-time gated backbones download/load.
       - LOAD_POLICY_TIMEOUT_S=${LOAD_POLICY_TIMEOUT_S:-7200}
@@ -302,38 +276,11 @@ services:
     ipc: host
 
     environment:
-      - ROS_DOMAIN_ID=${ROS_DOMAIN_ID:-30}
-      # Runtime scripts source this file after container env. Edit the
-      # host copy at docker/workspace/config/ros_zenoh.env when the
-      # Zenoh router IP/domain changes.
-      - CYCLO_ROS_ENV_FILE=/workspace/config/ros_zenoh.env
-      - ZENOH_ROUTER_IP=127.0.0.1
-      - ZENOH_ROUTER_PORT=7447
-      - ZENOH_SDK_PATH=/zenoh_sdk
-      - ZENOH_CONFIG_OVERRIDE=transport/shared_memory/enabled=true
-      - ZENOH_TRANSPORT_SHM_ENABLED=true
-      - ZENOH_SHM_ENABLED=true
-      - ROBOT_CLIENT_SDK_PATH=/robot_client_sdk
-      - ACTION_CHUNK_PROCESSING_SDK_PATH=/action_chunk_processing_sdk
-      - POLICY_BACKEND=groot
-      - POLICY_ENGINE_MODULE=groot_engine
-      # Start N1.7 in PyTorch eager mode. Enable after model-load/action
-      # smoke tests pass on the target robot.
-      - GROOT_TRT_ENABLED=false
       # Main-runtime waits on the local engine process while weights and
       # first-time gated backbones download/load.
       - LOAD_POLICY_TIMEOUT_S=${LOAD_POLICY_TIMEOUT_S:-7200}
-      - CONTROL_HZ=100
-      - INFERENCE_HZ=15
-      - TARGET_CHUNK_SIZE=none
-      - REFILL_MARGIN_S=0.2
-      - REFILL_LATENCY_WARMUP_SAMPLES=1
-      - REFILL_LATENCY_SAMPLE_MAX_S=2.0
       - CMD_VEL_LINEAR_DEADBAND=0.02
       - CMD_VEL_ANGULAR_DEADBAND=0.02
-      - HF_HOME=/root/.cache/huggingface
-      - HUGGINGFACE_HUB_CACHE=/root/.cache/huggingface/hub
-      - TRANSFORMERS_CACHE=/root/.cache/huggingface/hub
       - NVIDIA_VISIBLE_DEVICES=all
       - NVIDIA_DRIVER_CAPABILITIES=all
       - PYTHONUNBUFFERED=1

@@ -2,6 +2,11 @@
 Changelog for package shared
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
+1.1.2 (2026-07-06)
+------------------
+* Updated Cyclo release metadata to 1.1.2.
+* Contributors: Taehyeong Kim
+
 1.1.1 (2026-07-03)
 ------------------
 * Documented live camera grid placement order and supported ``rotation_deg`` values in robot configs.
