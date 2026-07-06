@@ -2,6 +2,11 @@
 Changelog for package cyclo-ui
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
+1.1.3 (2026-07-07)
+------------------
+* Updated Cyclo UI release metadata to 1.1.3.
+* Contributors: Taehyeong Kim
+
 1.1.2 (2026-07-06)
 ------------------
 * Updated Cyclo UI release metadata to 1.1.2.
