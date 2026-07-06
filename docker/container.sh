@@ -71,26 +71,6 @@ ensure_host_dir() {
     [ -d "$1" ] || mkdir -p "$1"
 }
 
-ensure_ros_zenoh_env() {
-    local workspace_dir="$1"
-    local config_dir="${workspace_dir}/config"
-    local env_file="${config_dir}/ros_zenoh.env"
-    local template="${SCRIPT_DIR}/config/ros_zenoh.default.env"
-
-    ensure_host_dir "$config_dir"
-    if [ -f "$env_file" ]; then
-        return 0
-    fi
-    if [ ! -f "$template" ]; then
-        echo "[container.sh] Warning: ROS/Zenoh default env missing: $template" >&2
-        return 0
-    fi
-
-    cp "$template" "$env_file"
-    echo "[container.sh] Created ROS/Zenoh runtime env from default: $env_file"
-    echo "[container.sh] Edit this file when ROS_DOMAIN_ID or Zenoh router changes."
-}
-
 storage_root_usable() {
     local root="$1"
     local probe="${root}/.cyclo-write-test.$$"
@@ -378,7 +358,6 @@ setup_storage() {
     ensure_host_dir "${workspace_dir}/model"
     ensure_host_dir "${workspace_dir}/model/lerobot"
     ensure_host_dir "${workspace_dir}/model/groot"
-    ensure_ros_zenoh_env "$workspace_dir"
     ensure_host_dir "$huggingface_dir"
 
     workspace_real="$(canonical_path "$workspace_dir")"
@@ -520,12 +499,9 @@ Environment:
                    CUDA archs for GR00T Blackwell flash-attn builds
                    (default 120)
   VERSION          image tag version (default: 1.1.1 for cyclo)
-  ROS_DOMAIN_ID    default 30
-  docker/config/ros_zenoh.default.env
-                   Shared default copied into the workspace on first start.
-  docker/workspace/config/ros_zenoh.env
-                   Runtime ROS/Zenoh env shared by s6 services and shells.
-                   Edit this file when the Zenoh router IP/domain changes.
+  ROS/Zenoh        Edit /root/.bashrc inside each container, then restart that
+                   container. docker restart preserves edits; recreating the
+                   container resets /root/.bashrc to the image default.
   CYCLO_STORAGE_MODE
                    auto | ssd | local (default auto). Containers always
                    mount docker/workspace and docker/huggingface. Auto uses
@@ -550,29 +526,9 @@ main_container_has_npm() {
         && docker exec "$MAIN_CONTAINER" sh -lc 'command -v npm >/dev/null 2>&1'
 }
 
-enter_bash_with_runtime_env() {
+enter_bash() {
     local container="$1"
-    docker exec -it "$container" bash -lc '
-        set -e
-        rc=/tmp/cyclo_enter_bashrc
-        if [ -f /root/.bashrc ]; then
-            cp /root/.bashrc "$rc"
-        else
-            : > "$rc"
-        fi
-        if ! grep -q "CYCLO_ROS_ENV_FILE" "$rc"; then
-            {
-                printf "\n"
-                printf "%s\n" "# Cyclo ROS/Zenoh runtime environment."
-                printf "%s\n" "# Edit /workspace/config/ros_zenoh.env instead of setting these values here."
-                printf "%s\n" "export CYCLO_ROS_ENV_FILE=\${CYCLO_ROS_ENV_FILE:-/workspace/config/ros_zenoh.env}"
-                printf "%s\n" "if [ -f \"\${CYCLO_ROS_ENV_FILE}\" ]; then"
-                printf "%s\n" "    source \"\${CYCLO_ROS_ENV_FILE}\""
-                printf "%s\n" "fi"
-            } >> "$rc"
-        fi
-        exec bash --rcfile "$rc" -i
-    '
+    docker exec -it "$container" bash
 }
 
 run_ui_npm_in_main() {
@@ -674,8 +630,13 @@ test_ui() {
 start_main() {
     setup_storage
     setup_x11
-    echo "[container.sh] Pulling pre-built image..."
-    $COMPOSE pull --ignore-pull-failures "$MAIN_SERVICE" || true
+    if [ -n "$BUILD_FLAG" ]; then
+        echo "[container.sh] Building $MAIN_SERVICE from local Dockerfile; skipping pre-built image pull."
+    else
+        echo "[container.sh] Pulling pre-built image..."
+        echo "[container.sh] Local Dockerfile changes are ignored without --build."
+        $COMPOSE pull --ignore-pull-failures "$MAIN_SERVICE" || true
+    fi
     echo "[container.sh] Starting $MAIN_SERVICE (ARCH=$ARCH${BUILD_FLAG:+, rebuild on})..."
     $COMPOSE up -d $BUILD_FLAG "$MAIN_SERVICE"
     echo "[container.sh] Done. 'docker/container.sh status' to check s6 services."
@@ -684,8 +645,13 @@ start_main() {
 start_lerobot() {
     setup_storage
     setup_x11
-    echo "[container.sh] Pulling pre-built images..."
-    $COMPOSE pull --ignore-pull-failures "$LEROBOT_SERVICE" || true
+    if [ -n "$BUILD_FLAG" ]; then
+        echo "[container.sh] Building $LEROBOT_SERVICE from local Dockerfile; skipping pre-built image pull."
+    else
+        echo "[container.sh] Pulling pre-built images..."
+        echo "[container.sh] Local Dockerfile/s6 changes are ignored without --build."
+        $COMPOSE pull --ignore-pull-failures "$LEROBOT_SERVICE" || true
+    fi
     remove_stale_policy_container "$LEROBOT_SERVICE" "$LEROBOT_CONTAINER"
     echo "[container.sh] Starting $LEROBOT_SERVICE (ARCH=$ARCH${BUILD_FLAG:+, rebuild on})..."
     $COMPOSE up -d $BUILD_FLAG "$LEROBOT_SERVICE"
@@ -694,8 +660,13 @@ start_lerobot() {
 start_groot() {
     setup_storage
     setup_x11
-    echo "[container.sh] Pulling pre-built images..."
-    $COMPOSE pull --ignore-pull-failures "$GROOT_SERVICE" || true
+    if [ -n "$BUILD_FLAG" ]; then
+        echo "[container.sh] Building $GROOT_SERVICE from local Dockerfile; skipping pre-built image pull."
+    else
+        echo "[container.sh] Pulling pre-built images..."
+        echo "[container.sh] Local Dockerfile/s6 changes are ignored without --build."
+        $COMPOSE pull --ignore-pull-failures "$GROOT_SERVICE" || true
+    fi
     remove_stale_policy_container "$GROOT_SERVICE" "$GROOT_CONTAINER"
     echo "[container.sh] Starting $GROOT_SERVICE (ARCH=$ARCH${BUILD_FLAG:+, rebuild on})..."
     $COMPOSE up -d $BUILD_FLAG "$GROOT_SERVICE"
@@ -706,9 +677,8 @@ enter_main() {
         echo "Error: $MAIN_CONTAINER is not running. Run 'start' first." >&2
         exit 1
     fi
-    ensure_ros_zenoh_env "${SCRIPT_DIR}/workspace"
     setup_x11
-    enter_bash_with_runtime_env "$MAIN_CONTAINER"
+    enter_bash "$MAIN_CONTAINER"
 }
 
 enter_lerobot() {
@@ -716,8 +686,7 @@ enter_lerobot() {
         echo "Error: $LEROBOT_CONTAINER is not running. Run 'start-lerobot' first." >&2
         exit 1
     fi
-    ensure_ros_zenoh_env "${SCRIPT_DIR}/workspace"
-    enter_bash_with_runtime_env "$LEROBOT_CONTAINER"
+    enter_bash "$LEROBOT_CONTAINER"
 }
 
 enter_groot() {
@@ -725,8 +694,7 @@ enter_groot() {
         echo "Error: $GROOT_CONTAINER is not running. Run 'start-groot' first." >&2
         exit 1
     fi
-    ensure_ros_zenoh_env "${SCRIPT_DIR}/workspace"
-    enter_bash_with_runtime_env "$GROOT_CONTAINER"
+    enter_bash "$GROOT_CONTAINER"
 }
 
 show_logs() {

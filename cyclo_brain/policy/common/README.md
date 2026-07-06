@@ -73,15 +73,16 @@ For LeRobot, user-trained models can be placed under
 | `REFILL_MARGIN_S` | no | `0.2` | Extra buffer time after observed GET_ACTION latency |
 | `REFILL_LATENCY_WARMUP_SAMPLES` | no | `1` | Initial GET_ACTION latency samples ignored for warmup |
 | `REFILL_LATENCY_SAMPLE_MAX_S` | no | `2.0` | Ignore longer latency samples; `none` disables filtering |
-| `ZENOH_ROUTER_IP` / `ZENOH_ROUTER_PORT` / `ROS_DOMAIN_ID` | no | `127.0.0.1 / 7447 / 30` | both |
+| `ROS_DOMAIN_ID` / `RMW_IMPLEMENTATION` / `ZENOH_CONFIG_OVERRIDE` | no | set in `/root/.bashrc` | both |
 
-`main-runtime` and `engine-process` source
-`/workspace/config/ros_zenoh.env` before applying these defaults. Update the
-host-side `docker/workspace/config/ros_zenoh.env` file when the robot's Zenoh
-router or ROS domain changes. `docker/container.sh start*` creates that file
-from the shared default `docker/config/ros_zenoh.default.env` if it is missing.
-Restarting the policy container is enough for the s6 processes to read the new
-values.
+`main-runtime` and `engine-process` source `/root/.bashrc` before applying
+these defaults. Enter the policy container, edit the Cyclo ROS/Zenoh block near
+the top of `/root/.bashrc` when the robot's Zenoh router or ROS domain changes.
+For a remote router, comment the local `ZENOH_CONFIG_OVERRIDE` line and uncomment
+the remote example with the router's IP, then restart the policy container so s6
+processes read the new values.
+`docker restart` preserves the edit; recreating or updating the container
+resets `/root/.bashrc` to the image default.
 
 For GR00T N1.7, the trained checkpoint may reference the gated
 `nvidia/Cosmos-Reason2-2B` backbone instead of vendoring those weights. Register

@@ -121,14 +121,15 @@ LeRobot Training/Inference APIs
 |----------|-------|-------------|
 | RMW_IMPLEMENTATION | rmw_zenoh_cpp | ROS2 Zenoh middleware |
 | ROS_DOMAIN_ID | 30 | ROS2 domain |
-| ZENOH_CONFIG_OVERRIDE | (see compose) | Zenoh client configuration |
+| ZENOH_CONFIG_OVERRIDE | local shared-memory default or remote router example in `/root/.bashrc` | Zenoh client configuration |
 
-At runtime, `lerobot_server` sources `/workspace/config/ros_zenoh.env` before
-starting `main-runtime` and `engine-process`. Edit the host-side
-`docker/workspace/config/ros_zenoh.env` file for robot-specific Zenoh router
-settings instead of baking router IPs into the image or `.bashrc`.
-`docker/container.sh start-lerobot` creates the workspace file from the shared
-default `docker/config/ros_zenoh.default.env` when it is missing.
+At runtime, `lerobot_server` sources `/root/.bashrc` before starting
+`main-runtime` and `engine-process`. Enter the container, edit the Cyclo
+ROS/Zenoh block near the top of `/root/.bashrc`, and choose either the local
+`ZENOH_CONFIG_OVERRIDE` line or the commented remote router example. Then restart
+`lerobot_server`. `docker restart` preserves the edit;
+recreating or updating the container resets `/root/.bashrc` to the image
+default.
 
 ## Testing
 
@@ -167,7 +168,7 @@ docker run --rm --gpus all nvidia/cuda:12.1-base-ubuntu22.04 nvidia-smi
 ### Zenoh connection failed
 
 ```bash
-# Ensure the externally managed Zenoh router is running on ZENOH_ROUTER_IP:ZENOH_ROUTER_PORT.
+# Ensure the externally managed Zenoh router is running on the endpoint in ZENOH_CONFIG_OVERRIDE.
 ss -ltnp 'sport = :7447'
 ```
 
