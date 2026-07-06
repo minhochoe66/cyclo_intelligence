@@ -1384,8 +1384,8 @@ class RosbagToLerobotConverterBase:
             pass
         self._state_joint_names = list(payload.get("state_joint_names") or [])
         self._action_joint_names = list(payload.get("action_joint_names") or [])
-        episode.observation_state_names = list(self._state_joint_names)
-        episode.action_names = list(self._action_joint_names)
+        episode.observation_state_names = list(self._state_joint_names or [])
+        episode.action_names = list(self._action_joint_names or [])
         staleness = payload.get("staleness_metrics")
         if isinstance(staleness, dict):
             self._staleness_reports[int(episode_index)] = staleness
@@ -1429,8 +1429,8 @@ class RosbagToLerobotConverterBase:
             "version": _PREPARED_EPISODE_CACHE_VERSION,
             "episode_index": int(episode.episode_index),
             "episode": episode,
-            "state_joint_names": list(self._state_joint_names),
-            "action_joint_names": list(self._action_joint_names),
+            "state_joint_names": list(self._state_joint_names or []),
+            "action_joint_names": list(self._action_joint_names or []),
             "staleness_metrics": self._staleness_reports.get(episode.episode_index, {}),
             "video_file_stats": video_file_stats,
         }
@@ -1686,10 +1686,10 @@ class RosbagToLerobotConverterBase:
             start_frame = frame_cursor
             if not stitched.observation_state_names:
                 stitched.observation_state_names = list(
-                    segment_episode.observation_state_names
+                    segment_episode.observation_state_names or []
                 )
             if not stitched.action_names:
-                stitched.action_names = list(segment_episode.action_names)
+                stitched.action_names = list(segment_episode.action_names or [])
             stitched.observation_state.extend(segment_episode.observation_state)
             stitched.action.extend(segment_episode.action)
             stitched.timestamps.extend(
@@ -2082,9 +2082,11 @@ class RosbagToLerobotConverterBase:
                 continue
             base_ts = float(ep.timestamps[0])
             if not stitched.observation_state_names:
-                stitched.observation_state_names = list(ep.observation_state_names)
+                stitched.observation_state_names = list(
+                    ep.observation_state_names or []
+                )
             if not stitched.action_names:
-                stitched.action_names = list(ep.action_names)
+                stitched.action_names = list(ep.action_names or [])
             remapped = [float(ts) - base_ts + offset for ts in ep.timestamps]
             stitched.timestamps.extend(remapped)
             stitched.observation_state.extend(ep.observation_state)
@@ -2960,8 +2962,8 @@ class RosbagToLerobotConverterBase:
         episode, staleness_metrics = self._resample_to_fps(
             episode, state_messages, action_messages, trim_start
         )
-        episode.observation_state_names = list(self._state_joint_names)
-        episode.action_names = list(self._action_joint_names)
+        episode.observation_state_names = list(self._state_joint_names or [])
+        episode.action_names = list(self._action_joint_names or [])
 
         self._staleness_reports[episode_index] = staleness_metrics
         self._log_staleness_summary(staleness_metrics)
@@ -3083,8 +3085,8 @@ class RosbagToLerobotConverterBase:
         episode.source_path = None
         self._state_joint_names = list(payload.get("state_joint_names") or [])
         self._action_joint_names = list(payload.get("action_joint_names") or [])
-        episode.observation_state_names = list(self._state_joint_names)
-        episode.action_names = list(self._action_joint_names)
+        episode.observation_state_names = list(self._state_joint_names or [])
+        episode.action_names = list(self._action_joint_names or [])
         staleness = payload.get("staleness_metrics")
         if isinstance(staleness, dict):
             self._staleness_reports[int(episode_index)] = staleness
@@ -3100,8 +3102,8 @@ class RosbagToLerobotConverterBase:
         payload = {
             "version": _EXTRACT_CACHE_VERSION,
             "episode": episode,
-            "state_joint_names": list(self._state_joint_names),
-            "action_joint_names": list(self._action_joint_names),
+            "state_joint_names": list(self._state_joint_names or []),
+            "action_joint_names": list(self._action_joint_names or []),
             "staleness_metrics": staleness_metrics,
         }
         tmp_path: Optional[Path] = None
@@ -5018,9 +5020,12 @@ class RosbagToLerobotConverterBase:
         state_names_from_config = self._joint_names_from_config('follower_')
         action_names_from_config = self._joint_names_from_config('leader_')
 
-        def _names_for_dim(candidates: List[List[str]], dim: int) -> Optional[List[str]]:
+        def _names_for_dim(
+            candidates: List[Optional[List[str]]],
+            dim: int,
+        ) -> Optional[List[str]]:
             for names in candidates:
-                if len(names) == dim:
+                if names is not None and len(names) == dim:
                     return list(names)
             return None
 

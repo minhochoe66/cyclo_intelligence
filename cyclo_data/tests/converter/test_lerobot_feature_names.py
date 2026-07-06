@@ -106,3 +106,30 @@ def test_feature_names_can_use_later_episode_names(tmp_path):
     converter._build_features(episodes)
 
     assert converter._features["action"]["names"] == action_names
+
+
+def test_feature_names_ignore_none_name_sources(tmp_path):
+    converter = RosbagToLerobotConverterBase(
+        ConversionConfig(repo_id="test", output_dir=tmp_path)
+    )
+    action_names = [f"arm_joint_{i}" for i in range(57)]
+    converter._state_joint_names = None
+    converter._action_joint_names = None
+
+    first = EpisodeData(
+        episode_index=0,
+        observation_state=[np.zeros(60, dtype=np.float32)],
+        action=[np.zeros(57, dtype=np.float32)],
+    )
+    first.observation_state_names = None
+    first.action_names = None
+    second = EpisodeData(
+        episode_index=1,
+        observation_state=[np.zeros(60, dtype=np.float32)],
+        action=[np.zeros(57, dtype=np.float32)],
+        action_names=action_names,
+    )
+
+    converter._build_features([first, second])
+
+    assert converter._features["action"]["names"] == action_names
