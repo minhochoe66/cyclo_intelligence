@@ -95,4 +95,6 @@ fi
 # Execute the ROS2 command. 'exec' ensures the command becomes PID 1 of
 # this service so s6 can signal it and its children. stdout/stderr are
 # piped to the matching <name>-log consumer via producer-for/consumer-for.
+# /root/.bashrc has already been sourced above; keep the command shell
+# non-interactive so the bashrc block is not applied twice.
 exec bash -c "${ROS2_CMD}"
