@@ -133,4 +133,39 @@ def test_compose_does_not_override_ros_zenoh_runtime_env():
     for entry in removed_entries:
         assert entry not in contents
 
-    assert "ZENOH_SDK_PATH=/zenoh_sdk" in contents
+
+def test_policy_compose_keeps_image_defaults_in_images():
+    compose = (REPO_ROOT / "docker" / "docker-compose.yml").read_text()
+    duplicated_entries = (
+        "ZENOH_SDK_PATH=/zenoh_sdk",
+        "ROBOT_CLIENT_SDK_PATH=/robot_client_sdk",
+        "ACTION_CHUNK_PROCESSING_SDK_PATH=/action_chunk_processing_sdk",
+        "POLICY_BACKEND=lerobot",
+        "POLICY_ENGINE_MODULE=lerobot_engine",
+        "POLICY_BACKEND=groot",
+        "POLICY_ENGINE_MODULE=groot_engine",
+        "GROOT_TRT_ENABLED=false",
+        "CONTROL_HZ=100",
+        "INFERENCE_HZ=15",
+        "TARGET_CHUNK_SIZE=none",
+        "REFILL_MARGIN_S=0.2",
+        "REFILL_LATENCY_WARMUP_SAMPLES=1",
+        "REFILL_LATENCY_SAMPLE_MAX_S=2.0",
+        "HF_HOME=/root/.cache/huggingface",
+        "HUGGINGFACE_HUB_CACHE=/root/.cache/huggingface/hub",
+        "TRANSFORMERS_CACHE=/root/.cache/huggingface/hub",
+    )
+    for entry in duplicated_entries:
+        assert entry not in compose
+
+    policy_dockerfiles = (
+        REPO_ROOT / "cyclo_brain" / "policy" / "lerobot" / "Dockerfile.arm64",
+        REPO_ROOT / "cyclo_brain" / "policy" / "lerobot" / "Dockerfile.amd64",
+        REPO_ROOT / "cyclo_brain" / "policy" / "groot" / "Dockerfile.arm64",
+        REPO_ROOT / "cyclo_brain" / "policy" / "groot" / "Dockerfile.amd64",
+    )
+    for dockerfile in policy_dockerfiles:
+        contents = dockerfile.read_text()
+        assert "ENV ZENOH_SDK_PATH=/zenoh_sdk" in contents
+        assert "ENV ROBOT_CLIENT_SDK_PATH=/robot_client_sdk" in contents
+        assert "ENV ACTION_CHUNK_PROCESSING_SDK_PATH=/action_chunk_processing_sdk" in contents

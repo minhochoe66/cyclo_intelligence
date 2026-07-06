@@ -2,6 +2,11 @@
 Changelog for package cyclo-ui
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
+1.1.2 (2026-07-06)
+------------------
+* Updated Cyclo UI release metadata to 1.1.2.
+* Contributors: Taehyeong Kim
+
 1.1.1 (2026-07-03)
 ------------------
 * Applied robot-configured camera rotations in the live camera grid.

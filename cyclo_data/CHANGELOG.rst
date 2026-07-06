@@ -2,6 +2,11 @@
 Changelog for package cyclo_data
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
+1.1.2 (2026-07-06)
+------------------
+* Updated Cyclo release metadata to 1.1.2.
+* Contributors: Taehyeong Kim
+
 1.1.1 (2026-07-03)
 ------------------
 * Updated Cyclo release metadata to 1.1.1.

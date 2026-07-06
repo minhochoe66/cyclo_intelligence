@@ -66,7 +66,7 @@ For LeRobot, user-trained models can be placed under
 | `POLICY_ENGINE_MODULE` | no | `${POLICY_BACKEND}_engine` | Engine process |
 | `POLICY_ENGINE_FACTORY` | no | `create_engine` | Engine process |
 | `GET_ACTION_TIMEOUT_S` | no | `5.0` | Main -> Engine request |
-| `LOAD_POLICY_TIMEOUT_S` | no | `300.0` | Main -> Engine request |
+| `LOAD_POLICY_TIMEOUT_S` | no | `7200.0` | Main -> Engine request |
 | `INFERENCE_HZ` | no | `15.0` | Main action waypoint timing |
 | `CONTROL_HZ` | no | `100.0` | Main robot command loop |
 | `TARGET_CHUNK_SIZE` | no | `none` | Fixed-size resampling override; `none` keeps chunk duration |
