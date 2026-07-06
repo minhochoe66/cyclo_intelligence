@@ -20,34 +20,11 @@ if [ -z "${SERVICE_NAME}" ]; then
     exit 1
 fi
 
-# Shared runtime ROS/Zenoh env. Users edit /root/.bashrc, then restart the
-# container or this s6 service. The image writes Cyclo's env block at the top
-# of /root/.bashrc; PS1 is set as a fallback for bashrc files guarded by PS1.
-if [ -f /root/.bashrc ]; then
-    echo "[${SERVICE_NAME}] Loading ROS/Zenoh env from /root/.bashrc"
-    _cyclo_saved_ps1="${PS1-}"
-    _cyclo_saved_ifs="${IFS}"
-    _cyclo_saved_opts="$(set +o)"
-    PS1="${PS1:-cyclo-s6}"
-    set +e
-    # shellcheck source=/root/.bashrc
-    source /root/.bashrc
-    _cyclo_bashrc_rc=$?
-    eval "${_cyclo_saved_opts}"
-    IFS="${_cyclo_saved_ifs}"
-    if [ -n "${_cyclo_saved_ps1+x}" ]; then
-        PS1="${_cyclo_saved_ps1}"
-    else
-        unset PS1
-    fi
-    unset _cyclo_saved_ps1 _cyclo_saved_ifs _cyclo_saved_opts
-    if [ "${_cyclo_bashrc_rc}" -ne 0 ]; then
-        echo "[${SERVICE_NAME}] Warning: /root/.bashrc returned ${_cyclo_bashrc_rc}; applying built-in defaults for missing values"
-    fi
-    unset _cyclo_bashrc_rc
-else
-    echo "[${SERVICE_NAME}] /root/.bashrc not found; using built-in defaults"
-fi
+# Match cyclo_manager: run the service body in an interactive bash so
+# /root/.bashrc is applied by bash itself before ROS/Zenoh defaults and
+# launch setup run.
+exec bash -ic '
+set -e
 
 # Default ROS env (override via shared/container environment).
 export ROS_DOMAIN_ID=${ROS_DOMAIN_ID:-30}
@@ -75,7 +52,7 @@ echo "[${SERVICE_NAME}] COLCON_WS=${COLCON_WS}"
 echo "[${SERVICE_NAME}] PID: $$"
 
 # Record process group id so the finish script can target the whole group.
-PGID=$(ps -o pgid= -p $$ | tr -d ' ')
+PGID=$(ps -o pgid= -p $$ | tr -d " ")
 echo "[${SERVICE_NAME}] Process group: ${PGID}"
 echo "${PGID}" > /run/${SERVICE_NAME}.pgid || true
 
@@ -92,9 +69,8 @@ else
     echo "[${SERVICE_NAME}] Executing default command: ${ROS2_CMD}"
 fi
 
-# Execute the ROS2 command. 'exec' ensures the command becomes PID 1 of
+# Execute the ROS2 command. exec ensures the command becomes PID 1 of
 # this service so s6 can signal it and its children. stdout/stderr are
 # piped to the matching <name>-log consumer via producer-for/consumer-for.
-# /root/.bashrc has already been sourced above; keep the command shell
-# non-interactive so the bashrc block is not applied twice.
 exec bash -c "${ROS2_CMD}"
+'

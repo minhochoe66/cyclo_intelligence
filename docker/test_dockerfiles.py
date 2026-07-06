@@ -97,7 +97,7 @@ def test_ros_zenoh_runtime_env_file_is_not_referenced_by_images_or_s6():
         assert "ros_zenoh.env" not in contents, f"{path} references the old runtime env file"
 
 
-def test_s6_services_source_root_bashrc():
+def test_s6_services_run_through_interactive_bashrc_shell():
     paths = (
         REPO_ROOT / "docker" / "s6-services" / "common" / "ros2_service_run.sh",
         REPO_ROOT / "cyclo_brain" / "policy" / "common" / "s6-services" / "main-runtime" / "run",
@@ -108,7 +108,8 @@ def test_s6_services_source_root_bashrc():
 
     for path in paths:
         contents = path.read_text()
-        assert "source /root/.bashrc" in contents, f"{path} does not source /root/.bashrc"
+        assert "bash -ic" in contents, f"{path} does not run through an interactive bashrc shell"
+        assert "source /root/.bashrc" not in contents, f"{path} manually sources /root/.bashrc"
         assert "export ROS_DOMAIN_ID=${ROS_DOMAIN_ID:-30}" in contents
         assert (
             "export ZENOH_CONFIG_OVERRIDE=${ZENOH_CONFIG_OVERRIDE:-transport/shared_memory/enabled=true}"
