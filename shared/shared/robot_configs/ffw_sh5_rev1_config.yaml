@@ -3,6 +3,8 @@ orchestrator:
     ffw_sh5_rev1:
       robot_name: "FFW SH5 Rev1"
       urdf_path: urdf/ffw_sh5_follower.urdf
+      joystick:
+        trigger_topic: /leader/joystick_controller/tact_trigger
 
       # part of the default SH5 recording layout.
       observation:
