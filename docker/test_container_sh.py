@@ -60,7 +60,6 @@ def _stub_env(tmp_path, log_path):
         "PATH": f"{tmp_path / 'bin'}:{os.environ['PATH']}",
         "DOCKER_STUB_LOG": str(log_path),
         "CYCLO_AGENT_SOCKETS_DIR": str(tmp_path / "agent_sockets"),
-        "CYCLO_STORAGE_MODE": "local",
     }
 
 
@@ -80,6 +79,27 @@ def test_start_does_not_create_legacy_runtime_env_file_from_default(tmp_path):
     legacy_runtime_env = docker_dir / "workspace" / "config" / "ros_zenoh.env"
     assert not legacy_runtime_env.exists()
     assert "Created ROS/Zenoh runtime env from default" not in result.stdout
+
+
+def test_start_creates_repo_local_mount_directories(tmp_path):
+    docker_dir = _copy_container_script(tmp_path)
+    log_path = _write_start_stub(tmp_path)
+
+    subprocess.run(
+        [str(docker_dir / "container.sh"), "start"],
+        cwd=tmp_path,
+        env=_stub_env(tmp_path, log_path),
+        check=True,
+        text=True,
+        capture_output=True,
+    )
+
+    assert (docker_dir / "workspace" / "dataset").is_dir()
+    assert (docker_dir / "workspace" / "rosbag2").is_dir()
+    assert (docker_dir / "workspace" / "lerobot").is_dir()
+    assert (docker_dir / "workspace" / "model" / "lerobot").is_dir()
+    assert (docker_dir / "workspace" / "model" / "groot").is_dir()
+    assert (docker_dir / "huggingface").is_dir()
 
 
 def test_start_preserves_existing_legacy_runtime_env_file_without_touching(tmp_path):
@@ -145,9 +165,6 @@ def test_start_pulls_main_image_only(tmp_path):
         "PATH": f"{tmp_path}:{os.environ['PATH']}",
         "DOCKER_STUB_LOG": str(log_path),
         "CYCLO_AGENT_SOCKETS_DIR": str(tmp_path / "agent_sockets"),
-        "CYCLO_STORAGE_MODE": "local",
-        "CYCLO_LOCAL_WORKSPACE_DIR": str(tmp_path / "workspace"),
-        "CYCLO_LOCAL_HUGGINGFACE_DIR": str(tmp_path / "huggingface"),
     }
 
     subprocess.run(
@@ -212,7 +229,7 @@ def test_start_does_not_remove_policy_container_with_stale_workspace_mount(tmp_p
         "      if [ \"$4\" = lerobot_server ]; then\n"
         "        printf '%s\\n' '/old/workspace'\n"
         "      else\n"
-        "        printf '%s\\n' \"$CYCLO_LOCAL_WORKSPACE_DIR\"\n"
+        "        printf '%s\\n' \"$EXPECTED_WORKSPACE_DIR\"\n"
         "      fi\n"
         "      exit 0\n"
         "      ;;\n"
@@ -227,9 +244,7 @@ def test_start_does_not_remove_policy_container_with_stale_workspace_mount(tmp_p
         "PATH": f"{tmp_path}:{os.environ['PATH']}",
         "DOCKER_STUB_LOG": str(log_path),
         "CYCLO_AGENT_SOCKETS_DIR": str(tmp_path / "agent_sockets"),
-        "CYCLO_STORAGE_MODE": "local",
-        "CYCLO_LOCAL_WORKSPACE_DIR": str(tmp_path / "workspace"),
-        "CYCLO_LOCAL_HUGGINGFACE_DIR": str(tmp_path / "huggingface"),
+        "EXPECTED_WORKSPACE_DIR": str(REPO_ROOT / "docker" / "workspace"),
     }
 
     subprocess.run(
@@ -283,9 +298,6 @@ def test_start_lerobot_removes_stale_workspace_mount(tmp_path):
         "PATH": f"{tmp_path}:{os.environ['PATH']}",
         "DOCKER_STUB_LOG": str(log_path),
         "CYCLO_AGENT_SOCKETS_DIR": str(tmp_path / "agent_sockets"),
-        "CYCLO_STORAGE_MODE": "local",
-        "CYCLO_LOCAL_WORKSPACE_DIR": str(tmp_path / "workspace"),
-        "CYCLO_LOCAL_HUGGINGFACE_DIR": str(tmp_path / "huggingface"),
     }
 
     subprocess.run(
