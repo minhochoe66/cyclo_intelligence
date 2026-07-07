@@ -8,7 +8,7 @@
 #                                         orchestrator / cyclo_data nodes
 #
 # Build context: cyclo_intelligence/ (repo root)
-#   docker build -f docker/Dockerfile.arm64 -t robotis/cyclo-intelligence:1.1.3-arm64 .
+#   docker build -f docker/Dockerfile.arm64 -t robotis/cyclo-intelligence:1.1.4-arm64 .
 #
 # lerobot / groot are separate containers (PLAN §4.8 on-demand pull);
 # this image intentionally does NOT bundle PyTorch / CUDA / LeRobot.
@@ -190,9 +190,9 @@ RUN { \
     echo ""; \
     echo "# Cyclo ROS/Zenoh runtime environment."; \
     echo "# For a remote Zenoh router, comment the local line and uncomment the remote example."; \
-    echo "export ROS_DOMAIN_ID=\"\${ROS_DOMAIN_ID:-30}\""; \
-    echo "export RMW_IMPLEMENTATION=\"\${RMW_IMPLEMENTATION:-rmw_zenoh_cpp}\""; \
-    echo "export ZENOH_CONFIG_OVERRIDE=\"\${ZENOH_CONFIG_OVERRIDE:-transport/shared_memory/enabled=true}\""; \
+    echo "export ROS_DOMAIN_ID=30"; \
+    echo "export RMW_IMPLEMENTATION=rmw_zenoh_cpp"; \
+    echo "export ZENOH_CONFIG_OVERRIDE='transport/shared_memory/enabled=true'"; \
     echo "# export ZENOH_CONFIG_OVERRIDE='transport/shared_memory/enabled=true;mode=\"client\";connect/endpoints=[\"tcp/192.168.60.139:7447\"]'"; \
     } > /tmp/cyclo_bashrc && \
     if [ -f /root/.bashrc ]; then cat /root/.bashrc >> /tmp/cyclo_bashrc; fi && \
