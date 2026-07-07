@@ -27,6 +27,7 @@ import {
   selectInferenceTaskInfo,
   selectRecordTaskInfo,
 } from '../features/tasks/taskSlice';
+import { CYCLO_VIDEO_SERVER_PORT } from '../config/runtimeConfig';
 
 const DEFAULT_SERVICE_TIMEOUT_MS = 10000;
 const START_INFERENCE_SERVICE_TIMEOUT_MS = 30000;
@@ -78,7 +79,7 @@ export function transformReplayDataResult(result = {}, bagPath = '') {
     action_timestamps: result.action_timestamps || [],
     action_names: result.action_names || [],
     action_values: result.action_values || [],
-    video_server_port: result.video_server_port || 8082,
+    video_server_port: result.video_server_port || CYCLO_VIDEO_SERVER_PORT,
     start_time: result.start_time || 0,
     end_time: result.end_time || 0,
     duration: result.duration || 0,
