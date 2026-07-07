@@ -2,6 +2,13 @@
 Changelog for package cyclo_brain
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
+1.1.4 (2026-07-07)
+------------------
+* Added installer-managed SSD checkout layout for ROBOTIS robot PCs and simplified container storage to repo-local workspace mounts.
+* Standardized container ``/root/.bashrc`` ROS/Zenoh defaults for Cyclo, LeRobot, and GR00T images.
+* Updated image support to ``robotis/cyclo-intelligence:1.1.4``, ``robotis/lerobot-zenoh:1.3.2``, and ``robotis/groot-zenoh:1.3.4``.
+* Contributors: Taehyeong Kim
+
 1.1.3 (2026-07-07)
 ------------------
 * Updated Cyclo release metadata to 1.1.3.

@@ -36,9 +36,9 @@ def test_interactive_bashrc_includes_simple_ros_zenoh_block():
         REPO_ROOT / "cyclo_brain" / "policy" / "groot" / "Dockerfile.amd64",
     )
     required = (
-        'export ROS_DOMAIN_ID=\\"\\${ROS_DOMAIN_ID:-30}\\"',
-        'export RMW_IMPLEMENTATION=\\"\\${RMW_IMPLEMENTATION:-rmw_zenoh_cpp}\\"',
-        'export ZENOH_CONFIG_OVERRIDE=\\"\\${ZENOH_CONFIG_OVERRIDE:-transport/shared_memory/enabled=true}\\"',
+        "export ROS_DOMAIN_ID=30",
+        "export RMW_IMPLEMENTATION=rmw_zenoh_cpp",
+        "export ZENOH_CONFIG_OVERRIDE='transport/shared_memory/enabled=true'",
         "# export ZENOH_CONFIG_OVERRIDE='transport/shared_memory/enabled=true;mode=\\\"client\\\";connect/endpoints=[\\\"tcp/192.168.60.139:7447\\\"]'",
     )
     removed = (

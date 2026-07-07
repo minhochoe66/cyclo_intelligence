@@ -2,6 +2,11 @@
 Changelog for package shared
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
+1.1.4 (2026-07-07)
+------------------
+* Updated Cyclo release metadata to 1.1.4.
+* Contributors: Taehyeong Kim
+
 1.1.3 (2026-07-07)
 ------------------
 * Updated Cyclo release metadata to 1.1.3.

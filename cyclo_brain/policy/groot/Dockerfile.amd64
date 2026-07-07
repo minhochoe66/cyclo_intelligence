@@ -4,7 +4,7 @@
 #
 # Based on official NVIDIA GR00T Dockerfile with Cyclo Intelligence integration
 # Build context: cyclo_intelligence/cyclo_brain/policy/groot/
-# Usage: docker build -f Dockerfile.amd64 -t robotis/groot-zenoh:1.3.3-amd64 .
+# Usage: docker build -f Dockerfile.amd64 -t robotis/groot-zenoh:1.3.4-amd64 .
 
 # NVIDIA PyTorch base image (same as official GR00T Dockerfile)
 ARG BASE_IMAGE=nvcr.io/nvidia/pytorch:25.04-py3
@@ -260,9 +260,9 @@ RUN { \
     echo ""; \
     echo "# Cyclo ROS/Zenoh runtime environment."; \
     echo "# For a remote Zenoh router, comment the local line and uncomment the remote example."; \
-    echo "export ROS_DOMAIN_ID=\"\${ROS_DOMAIN_ID:-30}\""; \
-    echo "export RMW_IMPLEMENTATION=\"\${RMW_IMPLEMENTATION:-rmw_zenoh_cpp}\""; \
-    echo "export ZENOH_CONFIG_OVERRIDE=\"\${ZENOH_CONFIG_OVERRIDE:-transport/shared_memory/enabled=true}\""; \
+    echo "export ROS_DOMAIN_ID=30"; \
+    echo "export RMW_IMPLEMENTATION=rmw_zenoh_cpp"; \
+    echo "export ZENOH_CONFIG_OVERRIDE='transport/shared_memory/enabled=true'"; \
     echo "# export ZENOH_CONFIG_OVERRIDE='transport/shared_memory/enabled=true;mode=\"client\";connect/endpoints=[\"tcp/192.168.60.139:7447\"]'"; \
     } > /tmp/cyclo_bashrc && \
     if [ -f /root/.bashrc ]; then cat /root/.bashrc >> /tmp/cyclo_bashrc; fi && \

@@ -2,6 +2,11 @@
 Changelog for package cyclo_data
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
+1.1.4 (2026-07-07)
+------------------
+* Updated Cyclo release metadata to 1.1.4.
+* Contributors: Taehyeong Kim
+
 1.1.3 (2026-07-07)
 ------------------
 * Preserved LeRobot state/action feature names when observation state and action dimensions differ.
