@@ -303,6 +303,133 @@ def test_robot_mode_rejects_conflicting_fstab_target(tmp_path):
     assert "mount " not in log_path.read_text()
 
 
+def test_robot_mode_rejects_conflict_even_when_exact_bind_exists(tmp_path):
+    home = tmp_path / "home"
+    home.mkdir()
+    ssd = tmp_path / "ssd"
+    ssd.mkdir()
+    install_dir = ssd / "cyclo_intelligence"
+    home_mount = home / "cyclo_intelligence"
+    exact_line = (
+        f"{install_dir} {home_mount} none "
+        f"bind,nofail,x-systemd.requires-mounts-for={ssd} 0 0"
+    )
+    fstab = tmp_path / "fstab"
+    fstab.write_text(
+        "# test fstab\n"
+        f"{exact_line}\n"
+        f"/mnt/other/cyclo_intelligence {home_mount} none bind 0 0\n"
+    )
+    log_path = tmp_path / "install.log"
+    bind_marker = tmp_path / "bind-mounted"
+    bin_dir = _write_stub_commands(tmp_path, hostname_value="ffw-SNPR48A1106")
+    env = {
+        **os.environ,
+        "PATH": f"{bin_dir}:{os.environ['PATH']}",
+        "HOME": str(home),
+        "INSTALL_TEST_LOG": str(log_path),
+        "INSTALL_TEST_HOME_MOUNT": str(home_mount),
+        "INSTALL_TEST_BIND_MOUNTED": str(bind_marker),
+        "CYCLO_INSTALL_REPO_URL": "https://example.invalid/cyclo.git",
+        "CYCLO_INSTALL_SSD_ROOT": str(ssd),
+        "CYCLO_INSTALL_FSTAB": str(fstab),
+    }
+
+    result = subprocess.run(
+        ["bash", str(INSTALLER)],
+        check=False,
+        env=env,
+        text=True,
+        capture_output=True,
+    )
+
+    assert result.returncode != 0
+    assert "fstab already contains a different mount" in result.stderr
+    assert "mount " not in log_path.read_text()
+
+
+def test_robot_mode_preserves_fstab_line_without_trailing_newline(tmp_path):
+    home = tmp_path / "home"
+    home.mkdir()
+    ssd = tmp_path / "ssd"
+    ssd.mkdir()
+    install_dir = ssd / "cyclo_intelligence"
+    home_mount = home / "cyclo_intelligence"
+    fstab = tmp_path / "fstab"
+    fstab.write_text("# test fstab without newline")
+    log_path = tmp_path / "install.log"
+    bind_marker = tmp_path / "bind-mounted"
+    bin_dir = _write_stub_commands(tmp_path, hostname_value="ffw-SNPR48A1106")
+    env = {
+        **os.environ,
+        "PATH": f"{bin_dir}:{os.environ['PATH']}",
+        "HOME": str(home),
+        "INSTALL_TEST_LOG": str(log_path),
+        "INSTALL_TEST_HOME_MOUNT": str(home_mount),
+        "INSTALL_TEST_BIND_MOUNTED": str(bind_marker),
+        "CYCLO_INSTALL_REPO_URL": "https://example.invalid/cyclo.git",
+        "CYCLO_INSTALL_SSD_ROOT": str(ssd),
+        "CYCLO_INSTALL_FSTAB": str(fstab),
+    }
+
+    result = subprocess.run(
+        ["bash", str(INSTALLER)],
+        check=False,
+        env=env,
+        text=True,
+        capture_output=True,
+    )
+
+    assert result.returncode == 0, result.stderr
+    expected_line = (
+        f"{install_dir} {home_mount} none "
+        f"bind,nofail,x-systemd.requires-mounts-for={ssd} 0 0"
+    )
+    assert fstab.read_text() == f"# test fstab without newline\n{expected_line}\n"
+
+
+def test_robot_mode_skips_mount_when_home_mount_already_active(tmp_path):
+    home = tmp_path / "home"
+    home.mkdir()
+    ssd = tmp_path / "ssd"
+    ssd.mkdir()
+    install_dir = ssd / "cyclo_intelligence"
+    home_mount = home / "cyclo_intelligence"
+    fstab = tmp_path / "fstab"
+    line = (
+        f"{install_dir} {home_mount} none "
+        f"bind,nofail,x-systemd.requires-mounts-for={ssd} 0 0"
+    )
+    fstab.write_text(f"# test fstab\n{line}\n")
+    log_path = tmp_path / "install.log"
+    bind_marker = tmp_path / "bind-mounted"
+    bind_marker.touch()
+    bin_dir = _write_stub_commands(tmp_path, hostname_value="ffw-SNPR48A1106")
+    env = {
+        **os.environ,
+        "PATH": f"{bin_dir}:{os.environ['PATH']}",
+        "HOME": str(home),
+        "INSTALL_TEST_LOG": str(log_path),
+        "INSTALL_TEST_HOME_MOUNT": str(home_mount),
+        "INSTALL_TEST_BIND_MOUNTED": str(bind_marker),
+        "CYCLO_INSTALL_REPO_URL": "https://example.invalid/cyclo.git",
+        "CYCLO_INSTALL_SSD_ROOT": str(ssd),
+        "CYCLO_INSTALL_FSTAB": str(fstab),
+    }
+
+    result = subprocess.run(
+        ["bash", str(INSTALLER)],
+        check=False,
+        env=env,
+        text=True,
+        capture_output=True,
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert f"{home_mount} is already mounted" in result.stdout
+    assert f"mount {home_mount}" not in log_path.read_text()
+
+
 def test_existing_home_path_safely_stops(tmp_path):
     home = tmp_path / "home"
     home.mkdir()

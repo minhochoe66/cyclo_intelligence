@@ -134,21 +134,31 @@ fstab_has_exact_bind() {
 fstab_has_conflicting_target() {
     awk -v src="$INSTALL_DIR" -v dst="$HOME_LINK" '
         $0 !~ /^[[:space:]]*#/ && $2 == dst {
-            found = 1
+            is_exact = 0
             if ($1 == src && $3 == "none") {
                 for (i = 4; i <= NF; i++) {
                     if ($i ~ /(^|,)bind(,|$)/) {
-                        exact = 1
+                        is_exact = 1
                     }
                 }
             }
+            if (!is_exact) {
+                conflict = 1
+            }
         }
-        END { exit(found && !exact ? 0 : 1) }
+        END { exit(conflict ? 0 : 1) }
     ' "$FSTAB_PATH"
 }
 
 append_fstab_line() {
     local line="$1"
+    if [ -s "$FSTAB_PATH" ] && [ -n "$(tail -c 1 "$FSTAB_PATH" 2>/dev/null)" ]; then
+        if [ -w "$FSTAB_PATH" ]; then
+            printf '\n' >> "$FSTAB_PATH"
+        else
+            printf '\n' | run_privileged tee -a "$FSTAB_PATH" >/dev/null
+        fi
+    fi
     if [ -w "$FSTAB_PATH" ]; then
         printf '%s\n' "$line" >> "$FSTAB_PATH"
         return
@@ -158,6 +168,10 @@ append_fstab_line() {
 
 configure_robot_bind_mount() {
     local fstab_line
+    if [ -L "$HOME_LINK" ]; then
+        echo "[install] Removing existing symlink at ${HOME_LINK}"
+        rm -f "$HOME_LINK"
+    fi
     mkdir -p "$HOME_LINK"
 
     if [ ! -f "$FSTAB_PATH" ]; then
@@ -177,11 +191,15 @@ configure_robot_bind_mount() {
         append_fstab_line "$fstab_line"
     fi
 
-    echo "[install] Mounting ${INSTALL_DIR} at ${HOME_LINK}"
-    run_privileged mount "$HOME_LINK"
-    if ! mountpoint -q "$HOME_LINK"; then
-        echo "Error: bind mount did not become active: $HOME_LINK" >&2
-        exit 1
+    if mountpoint -q "$HOME_LINK"; then
+        echo "[install] ${HOME_LINK} is already mounted."
+    else
+        echo "[install] Mounting ${INSTALL_DIR} at ${HOME_LINK}"
+        run_privileged mount "$HOME_LINK"
+        if ! mountpoint -q "$HOME_LINK"; then
+            echo "Error: bind mount did not become active: $HOME_LINK" >&2
+            exit 1
+        fi
     fi
 }
 
