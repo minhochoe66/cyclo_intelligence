@@ -113,6 +113,71 @@ def test_robot_mode_requires_mounted_ssd(tmp_path):
     assert not (home / "cyclo_intelligence").exists()
 
 
+def test_robot_mode_uses_sudo_when_ssd_parent_is_not_writable(tmp_path):
+    home = tmp_path / "home"
+    home.mkdir()
+    ssd = tmp_path / "ssd"
+    ssd.mkdir()
+    log_path = tmp_path / "install.log"
+    bin_dir = _write_stub_commands(
+        tmp_path,
+        hostname_value="ffw-SNPR48A1106",
+    )
+    install_dir = ssd / "cyclo_intelligence"
+
+    mkdir_stub = bin_dir / "mkdir"
+    mkdir_stub.write_text(
+        "#!/bin/sh\n"
+        "if [ \"$1\" = -p ] && [ \"$2\" = \"$CYCLO_INSTALL_SSD_ROOT/cyclo_intelligence\" ]; then\n"
+        "  printf '%s\\n' \"mkdir direct denied $*\" >> \"$INSTALL_TEST_LOG\"\n"
+        "  exit 1\n"
+        "fi\n"
+        "exec /bin/mkdir \"$@\"\n",
+    )
+    mkdir_stub.chmod(0o755)
+
+    sudo_stub = bin_dir / "sudo"
+    sudo_stub.write_text(
+        "#!/bin/sh\n"
+        "printf '%s\\n' \"sudo $*\" >> \"$INSTALL_TEST_LOG\"\n"
+        "if [ \"$1\" = mkdir ]; then\n"
+        "  shift\n"
+        "  exec /bin/mkdir \"$@\"\n"
+        "fi\n"
+        "if [ \"$1\" = chown ]; then\n"
+        "  exit 0\n"
+        "fi\n"
+        "exit 1\n",
+    )
+    sudo_stub.chmod(0o755)
+
+    env = {
+        **os.environ,
+        "PATH": f"{bin_dir}:{os.environ['PATH']}",
+        "HOME": str(home),
+        "INSTALL_TEST_LOG": str(log_path),
+        "CYCLO_INSTALL_REPO_URL": "https://example.invalid/cyclo.git",
+        "CYCLO_INSTALL_SSD_ROOT": str(ssd),
+    }
+
+    result = subprocess.run(
+        ["bash", str(INSTALLER)],
+        check=False,
+        env=env,
+        text=True,
+        capture_output=True,
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert install_dir.is_dir()
+    assert (home / "cyclo_intelligence").resolve() == install_dir
+    log = log_path.read_text()
+    assert "mkdir direct denied -p" in log
+    assert "sudo mkdir -p" in log
+    assert "sudo chown" in log
+    assert "clone --recurse-submodules --branch main" in log
+
+
 def test_existing_home_path_safely_stops(tmp_path):
     home = tmp_path / "home"
     home.mkdir()

@@ -94,7 +94,6 @@ assert_available_path() {
 }
 
 assert_ssd_ready() {
-    local probe
     require_command mountpoint
     if ! mountpoint -q "$SSD_ROOT"; then
         echo "Error: robot mode requires mounted SSD: $SSD_ROOT" >&2
@@ -104,12 +103,25 @@ assert_ssd_ready() {
         echo "Error: SSD path is not a directory: $SSD_ROOT" >&2
         exit 1
     fi
-    probe="${SSD_ROOT}/.cyclo-install-write-test.$$"
-    if ! mkdir "$probe" 2>/dev/null; then
-        echo "Error: SSD path is not writable: $SSD_ROOT" >&2
+}
+
+prepare_ssd_install_dir() {
+    local install_dir="$1"
+    if mkdir -p "$install_dir" 2>/dev/null; then
+        return
+    fi
+    if [ "$(id -u)" -eq 0 ]; then
+        mkdir -p "$install_dir"
+        return
+    fi
+    if ! command -v sudo >/dev/null 2>&1; then
+        echo "Error: SSD path is not writable and sudo is not available: $SSD_ROOT" >&2
         exit 1
     fi
-    rmdir "$probe" 2>/dev/null || true
+
+    echo "[install] Creating SSD install directory with sudo: $install_dir"
+    sudo mkdir -p "$install_dir"
+    sudo chown "$(id -u):$(id -g)" "$install_dir"
 }
 
 clone_repo() {
@@ -139,6 +151,7 @@ case "$MODE" in
         assert_ssd_ready
         assert_available_path "$INSTALL_DIR" "SSD install path"
         assert_available_path "$HOME_LINK" "home link path"
+        prepare_ssd_install_dir "$INSTALL_DIR"
         clone_repo "$INSTALL_DIR"
         ln -s "$INSTALL_DIR" "$HOME_LINK"
         echo "[install] Created symlink: ${HOME_LINK} -> ${INSTALL_DIR}"
