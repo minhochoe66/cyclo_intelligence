@@ -18,6 +18,7 @@ import React, { useCallback, useEffect, useRef } from 'react';
 import clsx from 'clsx';
 import { MdClose, MdScreenRotation } from 'react-icons/md';
 import { useSelector } from 'react-redux';
+import { CYCLO_WEB_VIDEO_SERVER_PORT } from '../config/runtimeConfig';
 
 const normalizeRotationDegrees = (value) => {
   const numeric = Number(value);
@@ -141,7 +142,7 @@ export default function ImageGridCell({
       // web_video_server expects base topic (e.g. .../image_raw); use default_transport=compressed to subscribe to CompressedImage
       // Do not encode slashes: server rejects %2F and expects literal /
       const streamTopic = topic.endsWith('/compressed') ? topic.slice(0, -11) : topic;
-      img.src = `http://${rosHost}:8085/stream?quality=50&type=ros_compressed&default_transport=compressed&topic=${streamTopic}&t=${timestamp}`;
+      img.src = `http://${rosHost}:${CYCLO_WEB_VIDEO_SERVER_PORT}/stream?quality=50&type=ros_compressed&default_transport=compressed&topic=${streamTopic}&t=${timestamp}`;
       img.alt = topic;
 
       img.onclick = (e) => e.stopPropagation();

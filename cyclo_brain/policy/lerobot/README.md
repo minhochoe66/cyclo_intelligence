@@ -64,7 +64,7 @@ docker compose -f docker/docker-compose.yml up lerobot
 ```
 Cyclo Intelligence Web UI (React UI)
         │
-        ▼ WebSocket (9090)
+        ▼ WebSocket (7090)
 Cyclo Intelligence Orchestrator (ROS2 + rmw_zenoh_cpp)
         │
         ▼ Zenoh Protocol (7447)

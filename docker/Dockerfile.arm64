@@ -242,7 +242,7 @@ RUN mkdir -p /var/log/orchestrator /var/log/cyclo_data /var/log/cyclo_intelligen
     chmod -R 02755 /var/log/orchestrator /var/log/cyclo_data /var/log/cyclo_intelligence /var/log/bt_node
 
 # supervisor_api (Step 6-D) — FastAPI control plane that nginx /api/
-# reverse-proxies to (port 8100). Registered as an s6 longrun; the
+# reverse-proxies to (port 7100 by default). Registered as an s6 longrun; the
 # /api/backends/* endpoints for lerobot / groot lifecycle are still
 # 501 stubs until the §4.8 follow-up adds docker-py.
 COPY docker/supervisor_api /opt/supervisor_api

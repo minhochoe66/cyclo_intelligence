@@ -1,7 +1,7 @@
 #!/command/with-contenv bash
 # supervisor_api — FastAPI control plane (PLAN §4.7).
 # Listens on ${CYCLO_SUPERVISOR_API_HOST}:${CYCLO_SUPERVISOR_API_PORT}
-# (defaults 127.0.0.1:8100); nginx reverse-proxies /api/ to it.
+# (defaults 127.0.0.1:7100); nginx reverse-proxies /api/ to it.
 
 set -e
 
@@ -9,7 +9,7 @@ export PYTHONUNBUFFERED=1
 export PYTHONPATH=/opt/supervisor_api:${PYTHONPATH}
 
 HOST="${CYCLO_SUPERVISOR_API_HOST:-127.0.0.1}"
-PORT="${CYCLO_SUPERVISOR_API_PORT:-8100}"
+PORT="${CYCLO_SUPERVISOR_API_PORT:-7100}"
 
 echo "[supervisor_api] starting uvicorn on ${HOST}:${PORT} ..."
 
