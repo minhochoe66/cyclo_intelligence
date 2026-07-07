@@ -1024,7 +1024,7 @@ def _parse_svstat(raw: str) -> dict:
 app = FastAPI(
     title="cyclo_intelligence supervisor_api",
     description=__doc__,
-    version="1.1.2",
+    version="1.1.3",
 )
 
 
