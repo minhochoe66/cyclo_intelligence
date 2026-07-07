@@ -5,7 +5,7 @@ conversion, policy training, inference, and robot execution with AI Worker.
 For detailed usage instructions, please refer to the documentation below.
   - [Documentation for AI Worker Imitation Learning](https://docs.robotis.com/docs/systems/aiworker/imitation_learning/)
 
-To install and start Cyclo Intelligence:
+To install Cyclo Intelligence:
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/ROBOTIS-GIT/cyclo_intelligence/main/install.sh | bash
@@ -15,6 +15,13 @@ On ROBOTIS robot PCs whose host name starts with `ffw`, the installer places
 the checkout under `/mnt/ssd/cyclo_intelligence` and creates
 `~/cyclo_intelligence` as a symlink. On other PCs, it installs directly under
 `~/cyclo_intelligence`.
+
+To start Cyclo Intelligence after installation:
+
+```bash
+cd ~/cyclo_intelligence
+./docker/container.sh start
+```
 
 To update an existing checkout:
 

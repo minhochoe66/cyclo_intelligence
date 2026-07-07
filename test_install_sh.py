@@ -73,17 +73,18 @@ def _run_install(tmp_path, args=None, hostname_value="dev-pc", ssd_mounted=True)
     return result, home, ssd, log_path
 
 
-def test_local_mode_installs_under_home_and_skips_start_with_no_start(tmp_path):
-    result, home, _ssd, log_path = _run_install(tmp_path, ["--local", "--no-start"])
+def test_local_mode_installs_under_home_and_prints_start_command(tmp_path):
+    result, home, _ssd, log_path = _run_install(tmp_path, ["--local"])
 
     assert result.returncode == 0, result.stderr
     assert (home / "cyclo_intelligence").is_dir()
     assert "clone --recurse-submodules --branch main" in log_path.read_text()
     assert "mountpoint " not in log_path.read_text()
     assert "container.sh start" not in log_path.read_text()
+    assert "./docker/container.sh start" in result.stdout
 
 
-def test_auto_robot_hostname_installs_on_ssd_and_symlinks_home(tmp_path):
+def test_auto_robot_hostname_installs_on_ssd_symlinks_home_and_does_not_start(tmp_path):
     result, home, ssd, log_path = _run_install(
         tmp_path,
         hostname_value="ffw-SNPR48A1106",
@@ -95,7 +96,8 @@ def test_auto_robot_hostname_installs_on_ssd_and_symlinks_home(tmp_path):
     assert install_dir.is_dir()
     assert home_link.is_symlink()
     assert home_link.resolve() == install_dir
-    assert "container.sh start" in log_path.read_text()
+    assert "container.sh start" not in log_path.read_text()
+    assert "./docker/container.sh start" in result.stdout
 
 
 def test_robot_mode_requires_mounted_ssd(tmp_path):
@@ -144,7 +146,7 @@ def test_existing_home_path_safely_stops(tmp_path):
 def test_ref_option_is_passed_to_git_clone(tmp_path):
     result, _home, _ssd, log_path = _run_install(
         tmp_path,
-        ["--local", "--ref", "v9.9.9", "--no-start"],
+        ["--local", "--ref", "v9.9.9"],
     )
 
     assert result.returncode == 0, result.stderr

@@ -6,25 +6,23 @@
 #   - hosts named ffw* install the repository under /mnt/ssd/cyclo_intelligence
 #     and expose it at ~/cyclo_intelligence via symlink.
 #   - other hosts install under ~/cyclo_intelligence.
-#   - the installer starts the main container after a successful clone.
+#   - the user starts the main container explicitly after installation.
 
 set -euo pipefail
 
 REPO_URL="${CYCLO_INSTALL_REPO_URL:-https://github.com/ROBOTIS-GIT/cyclo_intelligence.git}"
 REF="main"
 MODE="auto"
-START_AFTER_INSTALL=1
 SSD_ROOT="${CYCLO_INSTALL_SSD_ROOT:-/mnt/ssd}"
 
 usage() {
     cat <<EOF
-Usage: install.sh [--robot|--local] [--ref <branch-or-tag>] [--no-start]
+Usage: install.sh [--robot|--local] [--ref <branch-or-tag>]
 
 Options:
   --robot       Install under /mnt/ssd/cyclo_intelligence and symlink from home.
   --local       Install under ~/cyclo_intelligence.
   --ref REF     Git branch or tag to install (default: main).
-  --no-start    Install only; do not run docker/container.sh start.
   -h, --help    Show this help.
 EOF
 }
@@ -46,10 +44,6 @@ while [ "$#" -gt 0 ]; do
             fi
             REF="$2"
             shift 2
-            ;;
-        --no-start)
-            START_AFTER_INSTALL=0
-            shift
             ;;
         -h|--help)
             usage
@@ -161,12 +155,6 @@ case "$MODE" in
 esac
 
 echo "[install] Installed Cyclo Intelligence at: $INSTALL_DIR"
-
-if [ "$START_AFTER_INSTALL" -eq 1 ]; then
-    echo "[install] Starting Cyclo Intelligence..."
-    (cd "$INSTALL_DIR" && ./docker/container.sh start)
-else
-    echo "[install] Start skipped. Run:"
-    echo "  cd ${HOME_LINK}"
-    echo "  ./docker/container.sh start"
-fi
+echo "[install] Start Cyclo Intelligence manually with:"
+echo "  cd ${HOME_LINK}"
+echo "  ./docker/container.sh start"
