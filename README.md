@@ -12,8 +12,8 @@ curl -fsSL https://raw.githubusercontent.com/ROBOTIS-GIT/cyclo_intelligence/main
 ```
 
 On ROBOTIS robot PCs whose host name starts with `ffw`, the installer places
-the checkout under `/mnt/ssd/cyclo_intelligence` and creates
-`~/cyclo_intelligence` as a symlink. On other PCs, it installs directly under
+the checkout under `/mnt/ssd/cyclo_intelligence` and bind-mounts it at
+`~/cyclo_intelligence`. On other PCs, it installs directly under
 `~/cyclo_intelligence`.
 
 To learn more about the ROS 2 packages for the AI Worker, visit:
