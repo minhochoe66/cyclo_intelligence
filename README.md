@@ -16,21 +16,6 @@ the checkout under `/mnt/ssd/cyclo_intelligence` and creates
 `~/cyclo_intelligence` as a symlink. On other PCs, it installs directly under
 `~/cyclo_intelligence`.
 
-To start Cyclo Intelligence after installation:
-
-```bash
-cd ~/cyclo_intelligence
-./docker/container.sh start
-```
-
-To update an existing checkout:
-
-```bash
-cd ~/cyclo_intelligence
-git pull --ff-only
-git submodule update --init --recursive
-```
-
 To learn more about the ROS 2 packages for the AI Worker, visit:
   - [AI Worker ROS 2 Packages](https://github.com/ROBOTIS-GIT/ai_worker)
 
