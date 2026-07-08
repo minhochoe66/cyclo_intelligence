@@ -25,13 +25,13 @@ Thin FastAPI layer sitting between the UI (via nginx /api/) and:
 Run as:
     uvicorn supervisor_api.app:app \
         --host "${CYCLO_SUPERVISOR_API_HOST:-127.0.0.1}" \
-        --port "${CYCLO_SUPERVISOR_API_PORT:-8100}"
+        --port "${CYCLO_SUPERVISOR_API_PORT:-7100}"
 
-nginx proxies /api/ → 127.0.0.1:8100 (Step 6-E).
+nginx proxies /api/ → 127.0.0.1:7100 (Step 6-E).
 
 Environment overrides:
     CYCLO_SUPERVISOR_API_HOST         bind host (default 127.0.0.1)
-    CYCLO_SUPERVISOR_API_PORT         bind port (default 8100)
+    CYCLO_SUPERVISOR_API_PORT         bind port (default 7100)
     CYCLO_SUPERVISOR_API_REPO_MOUNT   in-container path of the repo bind-mount
                                       (default /root/ros2_ws/src/cyclo_intelligence)
     CYCLO_SUPERVISOR_API_COMPOSE_FILE absolute path to docker-compose.yml inside
@@ -1026,7 +1026,7 @@ def _parse_svstat(raw: str) -> dict:
 app = FastAPI(
     title="cyclo_intelligence supervisor_api",
     description=__doc__,
-    version="1.1.4",
+    version="1.1.5",
 )
 
 app.include_router(navigation_router)

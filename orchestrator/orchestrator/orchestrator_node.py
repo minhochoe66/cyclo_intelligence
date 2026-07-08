@@ -82,6 +82,13 @@ from rclpy.executors import MultiThreadedExecutor
 from rclpy.node import Node
 
 
+def _env_int(name, default):
+    try:
+        return int(os.environ.get(name, default))
+    except (TypeError, ValueError):
+        return int(default)
+
+
 class OrchestratorNode(Node):
     # Define operation modes (constants taken from Communicator)
 
@@ -89,7 +96,7 @@ class OrchestratorNode(Node):
     DEFAULT_TOPIC_TIMEOUT = 5.0  # seconds
     PUB_QOS_SIZE = 10
     TRAINING_STATUS_TIMER_FREQUENCY = 0.5  # seconds
-    VIDEO_SERVER_PORT = 8082  # Port for video file server
+    VIDEO_SERVER_PORT = _env_int('CYCLO_VIDEO_SERVER_PORT', '7082')
 
     class RosbagNotReadyException(Exception):
         """Exception raised when rosbag recording cannot start yet."""

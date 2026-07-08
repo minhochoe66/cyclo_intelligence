@@ -17,6 +17,7 @@
  */
 
 import { createSlice } from '@reduxjs/toolkit';
+import { CYCLO_VIDEO_SERVER_PORT } from '../../config/runtimeConfig';
 
 const initialState = {
   // Selected bag path
@@ -33,7 +34,7 @@ const initialState = {
   videoNames: [],  // Human-readable camera names
   videoFps: [],
   videoSegments: [],
-  videoServerPort: 8082,
+  videoServerPort: CYCLO_VIDEO_SERVER_PORT,
   bagPath: null,
 
   // Frame metadata
@@ -108,7 +109,7 @@ const replaySlice = createSlice({
       state.videoNames = data.video_names || [];
       state.videoFps = data.video_fps || [];
       state.videoSegments = data.video_segments || [];
-      state.videoServerPort = data.video_server_port || 8082;
+      state.videoServerPort = data.video_server_port || CYCLO_VIDEO_SERVER_PORT;
       state.bagPath = data.bag_path || null;
       state.frameIndices = data.frame_indices || [];
       state.frameTimestamps = data.frame_timestamps || [];

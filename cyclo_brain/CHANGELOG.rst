@@ -2,6 +2,13 @@
 Changelog for package cyclo_brain
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
+1.1.5 (2026-07-07)
+------------------
+* Switched robot installs to an SSD-backed bind mount at ``~/cyclo_intelligence`` with installer-managed ``/etc/fstab`` entries.
+* Moved Cyclo UI, rosbridge, replay data, web video, and supervisor API defaults to ``7080``, ``7090``, ``7082``, ``7085``, and ``7100``.
+* Updated image support to ``robotis/cyclo-intelligence:1.1.5``.
+* Contributors: Taehyeong Kim
+
 1.1.4 (2026-07-07)
 ------------------
 * Added installer-managed SSD checkout layout for ROBOTIS robot PCs and simplified container storage to repo-local workspace mounts.

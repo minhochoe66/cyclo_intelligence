@@ -1,4 +1,7 @@
+import os
 from pathlib import Path
+import subprocess
+import tempfile
 
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
@@ -133,6 +136,109 @@ def test_compose_does_not_override_ros_zenoh_runtime_env():
     )
     for entry in removed_entries:
         assert entry not in contents
+
+
+def test_cyclo_runtime_ports_avoid_physical_ai_defaults():
+    compose = (REPO_ROOT / "docker" / "docker-compose.yml").read_text()
+    nginx_run = (REPO_ROOT / "docker" / "s6-services" / "nginx" / "run").read_text()
+    supervisor_run = (
+        REPO_ROOT / "docker" / "s6-services" / "supervisor_api" / "run"
+    ).read_text()
+    launch = (
+        REPO_ROOT / "orchestrator" / "launch" / "orchestrator_bringup.launch.py"
+    ).read_text()
+    orchestrator = (
+        REPO_ROOT / "orchestrator" / "orchestrator" / "orchestrator_node.py"
+    ).read_text()
+    ui_config = (
+        REPO_ROOT / "orchestrator" / "ui" / "public" / "cyclo-config.js"
+    ).read_text()
+
+    expected_defaults = (
+        "CYCLO_UI_PORT=${CYCLO_UI_PORT:-7080}",
+        "CYCLO_ROSBRIDGE_PORT=${CYCLO_ROSBRIDGE_PORT:-7090}",
+        "CYCLO_VIDEO_SERVER_PORT=${CYCLO_VIDEO_SERVER_PORT:-7082}",
+        "CYCLO_WEB_VIDEO_SERVER_PORT=${CYCLO_WEB_VIDEO_SERVER_PORT:-7085}",
+        "CYCLO_SUPERVISOR_API_PORT=${CYCLO_SUPERVISOR_API_PORT:-7100}",
+    )
+    for expected in expected_defaults:
+        assert expected in compose
+
+    assert 'UI_PORT="$(port_or_default ' in nginx_run
+    assert "CYCLO_UI_PORT:-}\" 7080" in nginx_run
+    assert "CYCLO_ROSBRIDGE_PORT:-}\" 7090" in nginx_run
+    assert "CYCLO_VIDEO_SERVER_PORT:-}\" 7082" in nginx_run
+    assert "CYCLO_WEB_VIDEO_SERVER_PORT:-}\" 7085" in nginx_run
+    assert "CYCLO_SUPERVISOR_API_PORT:-}\" 7100" in nginx_run
+    assert 'PORT="${CYCLO_SUPERVISOR_API_PORT:-7100}"' in supervisor_run
+    assert "_env_int('CYCLO_ROSBRIDGE_PORT', '7090')" in launch
+    assert "_env_int('CYCLO_WEB_VIDEO_SERVER_PORT', '7085')" in launch
+    assert "_env_int('CYCLO_VIDEO_SERVER_PORT', '7082')" in orchestrator
+    assert "uiPort: 7080" in ui_config
+    assert "rosbridgePort: 7090" in ui_config
+    assert "videoServerPort: 7082" in ui_config
+    assert "webVideoServerPort: 7085" in ui_config
+    assert "supervisorApiPort: 7100" in ui_config
+
+    for old_default in (
+        "CYCLO_UI_PORT=${CYCLO_UI_PORT:-80}",
+        "CYCLO_ROSBRIDGE_PORT=${CYCLO_ROSBRIDGE_PORT:-9090}",
+        "CYCLO_VIDEO_SERVER_PORT=${CYCLO_VIDEO_SERVER_PORT:-8082}",
+        "CYCLO_WEB_VIDEO_SERVER_PORT=${CYCLO_WEB_VIDEO_SERVER_PORT:-8085}",
+        "CYCLO_SUPERVISOR_API_PORT=${CYCLO_SUPERVISOR_API_PORT:-8100}",
+    ):
+        assert old_default not in compose
+
+
+def test_nginx_runtime_port_rewrite_keeps_data_api_on_video_server():
+    nginx_run = (REPO_ROOT / "docker" / "s6-services" / "nginx" / "run").read_text()
+    nginx_conf = (REPO_ROOT / "orchestrator" / "ui" / "nginx.conf").read_text()
+
+    with tempfile.TemporaryDirectory() as tmp:
+        tmp_path = Path(tmp)
+        conf_path = tmp_path / "default.conf"
+        config_path = tmp_path / "cyclo-config.js"
+        script_path = tmp_path / "run-nginx-test.sh"
+
+        conf_path.write_text(nginx_conf)
+        test_script = nginx_run.split('exec nginx -g "daemon off;"')[0]
+        test_script = test_script.replace(
+            "/etc/nginx/conf.d/default.conf",
+            str(conf_path),
+        )
+        test_script = test_script.replace(
+            "/usr/share/nginx/html/cyclo-config.js",
+            str(config_path),
+        )
+        script_path.write_text(test_script)
+
+        subprocess.run(
+            ["bash", str(script_path)],
+            check=True,
+            text=True,
+            capture_output=True,
+            env={
+                **os.environ,
+                "CYCLO_UI_PORT": "7080",
+                "CYCLO_ROSBRIDGE_PORT": "7090",
+                "CYCLO_VIDEO_SERVER_PORT": "7082",
+                "CYCLO_WEB_VIDEO_SERVER_PORT": "7085",
+                "CYCLO_SUPERVISOR_API_PORT": "7100",
+            },
+        )
+
+        rewritten = conf_path.read_text()
+        assert "listen 7080;" in rewritten
+        assert "location /api/" in rewritten
+        assert "proxy_pass http://127.0.0.1:7100/;" in rewritten
+        assert "location /data-api/" in rewritten
+        assert "proxy_pass http://127.0.0.1:7082/;" in rewritten
+        assert rewritten.count("proxy_pass http://127.0.0.1:7100/;") == 1
+        assert rewritten.count("proxy_pass http://127.0.0.1:7082/;") == 1
+
+        runtime_config = config_path.read_text()
+        assert "rosbridgePort: 7090" in runtime_config
+        assert "videoServerPort: 7082" in runtime_config
 
 
 def test_policy_compose_keeps_image_defaults_in_images():

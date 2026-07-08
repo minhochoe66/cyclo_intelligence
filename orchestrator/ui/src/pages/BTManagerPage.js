@@ -51,6 +51,7 @@ import { useRosServiceCaller } from '../hooks/useRosServiceCaller';
 import { useBTHistory } from '../hooks/useBTHistory';
 import { useBTNodeCatalog } from '../hooks/useBTNodeCatalog';
 import { BT_SUPPORTED_ROBOT_TYPE, BT_UNSUPPORTED_ROBOT_MESSAGE, isBtRobotSupported } from '../constants/btSupport';
+import { CYCLO_VIDEO_SERVER_PORT } from '../config/runtimeConfig';
 
 const nodeTypes = {
   btControl: BTControlNode,
@@ -294,7 +295,7 @@ export default function BTManagerPage({ isActive = true }) {
     try {
       const urlMatch = rosbridgeUrl.match(/ws:\/\/([^:]+):/);
       const host = urlMatch ? urlMatch[1] : 'localhost';
-      const fileUrl = `http://${host}:8082${item.full_path}`;
+      const fileUrl = `http://${host}:${CYCLO_VIDEO_SERVER_PORT}${item.full_path}`;
       const response = await fetch(fileUrl);
       if (!response.ok) throw new Error(`Failed to fetch file: ${response.status}`);
 
@@ -548,7 +549,7 @@ export default function BTManagerPage({ isActive = true }) {
   const getHttpBaseUrl = useCallback(() => {
     const urlMatch = rosbridgeUrl.match(/ws:\/\/([^:]+):/);
     const host = urlMatch ? urlMatch[1] : 'localhost';
-    return `http://${host}:8082`;
+    return `http://${host}:${CYCLO_VIDEO_SERVER_PORT}`;
   }, [rosbridgeUrl]);
 
   // ── Serialize current graph to BT XML ────────────────────────────────────
