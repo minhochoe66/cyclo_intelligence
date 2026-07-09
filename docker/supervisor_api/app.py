@@ -50,9 +50,11 @@ import logging
 import os
 import re
 import subprocess
+import sys
 import threading
 import time
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Dict, List, Literal, Optional
 
 import docker
@@ -60,6 +62,13 @@ from docker.errors import DockerException, ImageNotFound, NotFound
 from fastapi import FastAPI, HTTPException
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
+
+# Tests load this file directly under the synthetic module name
+# ``supervisor_api_app``. Pin the package parent so absolute imports below
+# still resolve to this checked-out supervisor_api package.
+_PACKAGE_PARENT = str(Path(__file__).resolve().parent.parent)
+if _PACKAGE_PARENT not in sys.path:
+    sys.path.insert(0, _PACKAGE_PARENT)
 
 from supervisor_api.navigation import router as navigation_router
 
