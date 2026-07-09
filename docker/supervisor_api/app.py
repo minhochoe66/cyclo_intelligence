@@ -88,6 +88,32 @@ navigation_router = _navigation_module.router
 logger = logging.getLogger("supervisor_api")
 
 
+def _include_router_with_eager_routes(fastapi_app, router) -> None:
+    """Register a router and keep concrete route paths visible.
+
+    FastAPI 0.139 stores included routers as lazy ``_IncludedRouter`` entries.
+    Runtime dispatch can still resolve them, but tests and simple health checks
+    that inspect ``app.routes`` do not see the concrete ``route.path`` values.
+    Keep the normal include call for older FastAPI releases, then expand the
+    router routes only when the concrete paths are absent.
+    """
+    fastapi_app.include_router(router)
+    expected_paths = {
+        route.path for route in router.routes if hasattr(route, "path")
+    }
+    registered_paths = {
+        route.path for route in fastapi_app.routes if hasattr(route, "path")
+    }
+    if expected_paths.issubset(registered_paths):
+        return
+
+    fastapi_app.router.routes = [
+        route for route in fastapi_app.router.routes
+        if getattr(route, "original_router", None) is not router
+    ]
+    fastapi_app.router.routes.extend(router.routes)
+
+
 # -- s6-rc runner --------------------------------------------------------------
 
 
@@ -1050,7 +1076,7 @@ app = FastAPI(
     version="1.1.6",
 )
 
-app.include_router(navigation_router)
+_include_router_with_eager_routes(app, navigation_router)
 
 
 @app.get("/health", response_model=HealthResponse)
