@@ -45,6 +45,7 @@ Environment overrides:
 from __future__ import annotations
 
 import asyncio
+import importlib.util
 import json
 import logging
 import os
@@ -64,13 +65,24 @@ from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 
 # Tests load this file directly under the synthetic module name
-# ``supervisor_api_app``. Pin the package parent so absolute imports below
-# still resolve to this checked-out supervisor_api package.
+# ``supervisor_api_app``. Pin the package parent and load the navigation
+# router from the sibling file so route registration does not depend on
+# pytest's import path or module cache state.
 _PACKAGE_PARENT = str(Path(__file__).resolve().parent.parent)
 if _PACKAGE_PARENT not in sys.path:
     sys.path.insert(0, _PACKAGE_PARENT)
 
-from supervisor_api.navigation import router as navigation_router
+_NAVIGATION_PATH = Path(__file__).resolve().with_name("navigation.py")
+_NAVIGATION_SPEC = importlib.util.spec_from_file_location(
+    "supervisor_api.navigation",
+    _NAVIGATION_PATH,
+)
+if _NAVIGATION_SPEC is None or _NAVIGATION_SPEC.loader is None:
+    raise ImportError(f"Cannot load navigation router from {_NAVIGATION_PATH}")
+_navigation_module = importlib.util.module_from_spec(_NAVIGATION_SPEC)
+sys.modules[_NAVIGATION_SPEC.name] = _navigation_module
+_NAVIGATION_SPEC.loader.exec_module(_navigation_module)
+navigation_router = _navigation_module.router
 
 
 logger = logging.getLogger("supervisor_api")
