@@ -2,7 +2,7 @@
 Changelog for package cyclo-ui
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
-1.1.6 (2026-07-09)
+1.2.0 (2026-07-10)
 ------------------
 * Added the Navigation page with map viewing, map editing, status, toolbar, log, and ROS topic integration.
 * Added browser-side navigation API support for supervisor map and grid-cache endpoints.
