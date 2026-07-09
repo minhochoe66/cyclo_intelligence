@@ -94,7 +94,7 @@ def test_navigation_validates_map_name():
 
 
 def test_navigation_routes_are_registered():
-    paths = {route.path for route in app.app.routes}
+    paths = {route.path for route in app.app.routes if hasattr(route, "path")}
 
     assert "/navigation/status" in paths
     assert "/navigation/start" in paths
