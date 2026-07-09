@@ -361,7 +361,7 @@ def _ros_exec_environment() -> dict[str, str]:
     return {
         "ROS_DOMAIN_ID": os.environ.get("ROS_DOMAIN_ID", "30"),
         "RMW_IMPLEMENTATION": os.environ.get(
-            "RMW_IMPLEMENTATION", "rmw_fastrtps_cpp"
+            "RMW_IMPLEMENTATION", "rmw_zenoh_cpp"
         ),
     }
 
