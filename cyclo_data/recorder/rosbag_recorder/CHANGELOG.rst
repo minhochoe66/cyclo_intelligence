@@ -2,6 +2,10 @@
 Changelog for package rosbag_recorder
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
+1.1.6 (2026-07-09)
+------------------
+* None
+
 1.1.5 (2026-07-07)
 ------------------
 * Updated Cyclo release metadata to 1.1.5.

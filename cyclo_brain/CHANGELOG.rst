@@ -2,6 +2,10 @@
 Changelog for package cyclo_brain
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
+1.1.6 (2026-07-09)
+------------------
+* None
+
 1.1.5 (2026-07-07)
 ------------------
 * Switched robot installs to an SSD-backed bind mount at ``~/cyclo_intelligence`` with installer-managed ``/etc/fstab`` entries.

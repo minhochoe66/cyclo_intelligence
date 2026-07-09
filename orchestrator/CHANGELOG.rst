@@ -2,6 +2,10 @@
 Changelog for package orchestrator
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
+1.1.6 (2026-07-09)
+------------------
+* None
+
 1.1.5 (2026-07-07)
 ------------------
 * Moved Cyclo rosbridge, replay data, and web video server defaults to the 7xxx port range to avoid physical_ai_tools conflicts.
