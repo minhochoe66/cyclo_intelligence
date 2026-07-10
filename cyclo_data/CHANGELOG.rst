@@ -2,6 +2,10 @@
 Changelog for package cyclo_data
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
+1.2.0 (2026-07-10)
+------------------
+* None
+
 1.1.5 (2026-07-07)
 ------------------
 * Updated Cyclo release metadata to 1.1.5.

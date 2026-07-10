@@ -45,14 +45,17 @@ Environment overrides:
 from __future__ import annotations
 
 import asyncio
+import importlib.util
 import json
 import logging
 import os
 import re
 import subprocess
+import sys
 import threading
 import time
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Dict, List, Literal, Optional
 
 import docker
@@ -61,8 +64,54 @@ from fastapi import FastAPI, HTTPException
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 
+# Tests load this file directly under the synthetic module name
+# ``supervisor_api_app``. Pin the package parent and load the navigation
+# router from the sibling file so route registration does not depend on
+# pytest's import path or module cache state.
+_PACKAGE_PARENT = str(Path(__file__).resolve().parent.parent)
+if _PACKAGE_PARENT not in sys.path:
+    sys.path.insert(0, _PACKAGE_PARENT)
+
+_NAVIGATION_PATH = Path(__file__).resolve().with_name("navigation.py")
+_NAVIGATION_SPEC = importlib.util.spec_from_file_location(
+    "supervisor_api.navigation",
+    _NAVIGATION_PATH,
+)
+if _NAVIGATION_SPEC is None or _NAVIGATION_SPEC.loader is None:
+    raise ImportError(f"Cannot load navigation router from {_NAVIGATION_PATH}")
+_navigation_module = importlib.util.module_from_spec(_NAVIGATION_SPEC)
+sys.modules[_NAVIGATION_SPEC.name] = _navigation_module
+_NAVIGATION_SPEC.loader.exec_module(_navigation_module)
+navigation_router = _navigation_module.router
+
 
 logger = logging.getLogger("supervisor_api")
+
+
+def _include_router_with_eager_routes(fastapi_app, router) -> None:
+    """Register a router and keep concrete route paths visible.
+
+    FastAPI 0.139 stores included routers as lazy ``_IncludedRouter`` entries.
+    Runtime dispatch can still resolve them, but tests and simple health checks
+    that inspect ``app.routes`` do not see the concrete ``route.path`` values.
+    Keep the normal include call for older FastAPI releases, then expand the
+    router routes only when the concrete paths are absent.
+    """
+    fastapi_app.include_router(router)
+    expected_paths = {
+        route.path for route in router.routes if hasattr(route, "path")
+    }
+    registered_paths = {
+        route.path for route in fastapi_app.routes if hasattr(route, "path")
+    }
+    if expected_paths.issubset(registered_paths):
+        return
+
+    fastapi_app.router.routes = [
+        route for route in fastapi_app.router.routes
+        if getattr(route, "original_router", None) is not router
+    ]
+    fastapi_app.router.routes.extend(router.routes)
 
 
 # -- s6-rc runner --------------------------------------------------------------
@@ -1024,8 +1073,10 @@ def _parse_svstat(raw: str) -> dict:
 app = FastAPI(
     title="cyclo_intelligence supervisor_api",
     description=__doc__,
-    version="1.1.5",
+    version="1.2.0",
 )
+
+_include_router_with_eager_routes(app, navigation_router)
 
 
 @app.get("/health", response_model=HealthResponse)
